@@ -29,6 +29,38 @@ working — it simply has nothing to match against.
 **Writing the request the obvious way makes the cache invisible.** This is not a
 tuning problem; it is an API-usage problem, and it is free to fix.
 
+### The other reason reuse reads 0%: the 2,048-token checkpoint threshold
+
+Before blaming the request shape, check whether a checkpoint can exist at all.
+The engine only checkpoints a system prompt **when it is 2,048 tokens or more**
+(official DETAILS.md). Below that, reuse is structurally impossible:
+
+| Experiment | system prompt | Turn 2 prompt_tokens | cached_tokens | Reuse |
+|---|---|---:|---:|---:|
+| Short system prompt, three identical rounds | 245 tok | 245 | 0 | **0%** |
+| Agent tool loop (result appended each turn) | 265→291→317 | 265 | 0 | **0%** |
+| Long system prompt | 4 177 tok | 4 177 | 4 145 | **99.2%** |
+| Long system + tool list | 5 334 tok | 5 334 | 5 305 | **99.5%** |
+
+And when it does fire, the gain is large:
+
+| Workload | First turn | Turn 2 | Turn 3 | Speedup |
+|---|---:|---:|---:|---:|
+| Long system prompt (4 177 tok) | 4.36 s | **0.38 s** | **0.40 s** | **11.5×** |
+| + tool list (5 334 tok) | 5.18 s | **0.29 s** | **0.29 s** | **17.9×** |
+
+Real agent clients (Claude Code / OpenClaw) ship system prompts plus tool lists
+in the thousands of tokens by nature, so this fires automatically — **11–18×
+TTFT reduction with zero configuration**. The engine even pins client version
+stamps (`cch=` / `cc_version=`) the same way llama.cpp does.
+
+`--prompt-cache-root N` controls how many system-prompt checkpoints are kept
+(`0` = store none). We run the default; set it explicitly if you need to bound
+checkpoint storage.
+
+**So: reuse = 0% has exactly two causes — the prefix never matches (shape), or
+the prefix is under 2,048 tokens (threshold). Diagnose which before tuning.**
+
 ## 2. The correct shapes
 
 ### Long document / long system prompt + consecutive questions

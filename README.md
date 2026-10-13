@@ -103,7 +103,7 @@ fast path。我们不冒领别人的数字，列在这里只作天花板参照 �
 `--layer-split 25` + 专家 100% 常驻已经把这台机器榨到接近上限，换成 NVLink 机器或
 更大显存的卡，prefill 还能再上一个台阶（社区 4–6 卡 V100 带 NVLink 报到
 **7 357 tok/s prompt**，是我们 1 817 的 4 倍）。但**在没有 NVLink 的机器上，
-下面这套配置就是接近最优的解** —— 22 个开关我们全试过，采纳 12 个、证伪 10 个。
+下面这套配置就是接近最优的解** —— 23 个开关我们全试过，采纳 13 个、证伪 10 个。
 
 三个从数字里直接读出来的结论：
 
@@ -300,10 +300,15 @@ STRATA_KEY=xxx STRATA_URL=http://127.0.0.1:8080 python3 scripts/bench_prompt.py
 - [`docs/benchmarks.md`](docs/benchmarks.md) — **生产环境实测速度**：四档场景的 prefill/decode/MTP 数据、原始 JSON、以及五个测量坑
 - [`docs/calibers.md`](docs/calibers.md) — **口径分层方法论**：同一台机器为什么有五个不同的 tok/s（87~203），每个口径怎么测、什么时候用、为什么不能跨口径比
 - [`docs/methodology.md`](docs/methodology.md) — **七个 Loop 六次推翻自己的初始假设**：一条优化假设怎么被数据杀死，以及六步可复用的实验协议
+- [`docs/memory-and-thermals.md`](docs/memory-and-thermals.md) — **加内存/锁频/风扇三个"想当然"全部被推翻**：decode 为什么不涨、锁 1250 为什么反而慢、风扇自动模式为什么没生效（256K prefill +53% 的真解法）
 - [`docs/llamacpp-engine-comparison.md`](docs/llamacpp-engine-comparison.md) — **同机同模型换引擎**：prefill 28.7→427.6 tok/s（14.9×），瓶颈真身是 embedding 的放置位置
+- [`docs/engine-upgrade-notes.md`](docs/engine-upgrade-notes.md) — **v0.1.41→v0.1.43 升级实录**：307 个提交里只有三件与我们相关；A/B 持平为什么还升；一个会静默编出 CPU 版的坑
+- [`docs/storage-and-io.md`](docs/storage-and-io.md) — **存储与 I/O 核查**：SATA 不是热路径；`--ple-io ram` 在内存紧张的 NVMe 机器上会「解码正常但客户端卡几十秒」；先用分析器量瓶颈
+- [`docs/auditing-ai-tuning-plans.md`](docs/auditing-ai-tuning-plans.md) — **如何审计一份 AI 生成的调优方案**：14 个参数 11 个查无此物；「改专家数造四档模型」为什么物理不存在；相似匹配缓存为什么对 Agent 是系统性错误源
+- [`docs/client-call-patterns.md`](docs/client-call-patterns.md) — **调用姿势 4.19×**：同一个缓存机制，写法不对复用率就是 0%；另附 2,048 token checkpoint 门槛实测
 - [`docs/community-comparison.md`](docs/community-comparison.md) — **与社区数据的横向对比**：带出处链接、同一模型/引擎的对照表、四个容易误读的陷阱
 - [`docs/multigpu-wmma-bug.md`](docs/multigpu-wmma-bug.md) — 多卡 bug 的完整分析与补丁说明
-- [`docs/flag-ledger.md`](docs/flag-ledger.md) — 22 个开关的完整台账与证伪原因
+- [`docs/flag-ledger.md`](docs/flag-ledger.md) — 23 个开关的完整台账与证伪原因
 - [`docs/multi-gpu-and-interconnect.md`](docs/multi-gpu-and-interconnect.md) — 单卡/双卡/三卡/四卡 + NVLink 的建议矩阵
 - [`docs/how-we-measure.md`](docs/how-we-measure.md) — ABAB 协议与相位表读法（**先读这个再看数字**）
 
