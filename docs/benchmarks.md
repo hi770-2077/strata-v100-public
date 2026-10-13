@@ -23,6 +23,8 @@ same process, same flags, same GPU state that real requests hit.
 
 **Read the numbers as a reference point for this exact setup, not as a V100
 general benchmark.** We have no NVLink; a machine that does will differ.
+For how these figures compare against other people's published numbers, see
+[`community-comparison.md`](community-comparison.md).
 
 ## Headline numbers
 

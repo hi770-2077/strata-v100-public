@@ -36,6 +36,29 @@ Qwen3.8-Flash-Next IQ3_S。每档 3 轮取中位数，**每轮换不同 prompt**
 完整环境配置、每一轮原始数据、以及**五个踩过的测量坑**（含"缓存前缀会悄悄毁掉你的跑分"
 这个真实翻车），见 [`docs/benchmarks.md`](docs/benchmarks.md)。
 
+### 这在社区里算什么水平？
+
+**我们双 V100 的 110.8 tok/s decode，与社区独立第三方仓库实测的单张 RTX 4090
+（24GB，280W 功耗墙）完全相同** —— 2022 年的消费级旗舰卡，被 2017 年的数据中心卡打平。
+同期对照：
+
+| 配置 | decode tok/s |
+|---|---|
+| **我们 2× V100-32GB** | **110.8** |
+| 社区 1× RTX 4090 24GB（同模型同量化） | **110.8** |
+| 社区 2× RTX 3090（262K 上下文） | ~120 |
+| 社区 1× RTX 5090 96GB | 180–221 |
+| 社区 1× V100 32GB（同模型，Strata） | 50–55 |
+| 社区 4× V100 **带 NVLink**（IBM AC922 fork） | ~113 |
+
+我们不是第一：5090 和多卡 NVLink 机器仍然更快。**短板在 prefill —— 我们 1 704，
+带 NVLink 的 4–6 卡 V100 报到 7 357，差 4 倍**，原因是这台机器两张卡走 PCIe 无 NVLink，
+层切分时每个 token 都要跨总线。这是硬件约束，调优解决不了。
+
+每个数字都带出处链接，另附**三个最容易造成误读的对比陷阱**（同模型≠同工作量、
+上下文深度会吃掉大部分差距、MTP 接受率强依赖任务类型），见
+[`docs/community-comparison.md`](docs/community-comparison.md)。
+
 > ⚠️ 这是**我们这台机器的最优点，不是通用最优解**。无 NVLink 是这套数字的前提之一；
 > 有 NVLink 或换模型/换量化格式，结论都要重测。
 
@@ -153,6 +176,7 @@ STRATA_KEY=xxx STRATA_URL=http://127.0.0.1:8080 python3 scripts/bench_prompt.py
 ## 更多内容
 
 - [`docs/benchmarks.md`](docs/benchmarks.md) — **生产环境实测速度**：四档场景的 prefill/decode/MTP 数据、原始 JSON、以及五个测量坑
+- [`docs/community-comparison.md`](docs/community-comparison.md) — **与社区数据的横向对比**：带出处链接、同一模型/引擎的对照表、三个容易误读的陷阱
 - [`docs/multigpu-wmma-bug.md`](docs/multigpu-wmma-bug.md) — 多卡 bug 的完整分析与补丁说明
 - [`docs/flag-ledger.md`](docs/flag-ledger.md) — 19 个开关的完整台账与证伪原因
 - [`docs/multi-gpu-and-interconnect.md`](docs/multi-gpu-and-interconnect.md) — 单卡/双卡/三卡/四卡 + NVLink 的建议矩阵
