@@ -92,12 +92,6 @@ RTX 4090（24GB，280W 功耗墙）完全相同** —— 2022 年的消费级旗
 | 社区 1× RTX 5090 96GB | 180–221 |
 | 社区 4× V100 **带 NVLink**（IBM AC922 fork） | ~113 |
 | 社区 1× V100 32GB（同模型，Strata 官方无调优） | 50–55 |
-| 社区天花板：单张 V100 + 自写引擎 + 软件 NVFP4（**项目 NInfer，非本仓库**） | 201–219 † |
-
-† 那个 219 tok/s 属于另一个项目 **NInfer**（自写 C++/CUDA 引擎、稠密 Qwen3.8-27B、
-软件模拟 NVFP4、单卡 V100），条件是 172-token 逐字复现提示词的 context-reproduction
-fast path。我们不冒领别人的数字，列在这里只作天花板参照 —— 出处见
-[`docs/community-comparison.md`](docs/community-comparison.md)。
 
 **显存更大的卡会更快。** 我们这套数字的前提是 2×32GB 走 PCIe 层切分；
 `--layer-split 25` + 专家 100% 常驻已经把这台机器榨到接近上限，换成 NVLink 机器或

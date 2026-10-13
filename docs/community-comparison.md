@@ -151,42 +151,6 @@ numbers diverge by much more. That is the same compute-bound vs
 bandwidth-bound split we measured — MoE decode is memory-bound, so card
 generation matters far less than bandwidth.
 
-## The fastest V100 decode numbers we found — and where ours sits
-
-People searching "V100 decode tok/s" eventually hit **201–219 tok/s**. Here is
-the full picture, with each number's owner and conditions made explicit:
-
-| | This repository | NInfer |
-|---|---|---|
-| Engine | Strata (upstream, patched) | Own C++/CUDA inference engine |
-| Model | Qwen3.8-Flash-Next **MoE**, 48 layers / 512 experts | Qwen3.8 **27B dense** |
-| Quantization | IQ3_S (GGUF) | Software-emulated **NVFP4** |
-| Cards | 2× V100-32GB, PCIe, no NVLink | **1×** V100 |
-| Headline decode | **203.1 peak** / 110.8 chat | **201–219** |
-| Condition | stream-scrape, thinking off, structured benchmark, short context | 172-token **verbatim-copy prompt** — documented by that project as a "context-reproduction fast path" |
-
-Every one of those five variables differs. Their maintainer log also shows
-169–190 tok/s on longer, more realistic prompts.
-
-**How to read this honestly:**
-
-- **Our 203.1 and their 219 are the same order of magnitude, on the same card
-  class.** That is not a coincidence — it says the V100 has roughly this much
-  headroom in total, and both projects found most of it.
-- **The paths are not interchangeable.** We got there by patching an existing
-  engine (Volta-specific kernels, MTP draft-head tuning, host-core placement).
-  They got there by writing an engine from scratch and emulating a numeric
-  format in software. Our route is reproducible by anyone with a V100 and a
-  checkout; theirs requires a new engine.
-- **We do not claim their number, and they should not be credited with ours.**
-  Anyone comparing our 110.8 against 219 without reading this section would be
-  comparing different engines, different models, different numeric formats, and
-  different workloads — four mismatches at once.
-
-We list it as the **ceiling for this hardware class**: a single V100 has roughly
-twice our per-card headroom left on the table, reachable only by leaving GGUF
-and Strata behind. It is a target, not a score.
-
 ## Where we fall short
 
 **Prefill, by a wide margin, and it is structural.** A Strata fork on an IBM
@@ -219,7 +183,10 @@ unusable for comparison. See [`calibers.md`](calibers.md).
 **Model identity.** Most V100 reports online are for **Qwen3.8-27B**, a
 dense 27B model, not our 125B-class MoE. Dense-27B figures cluster at 23–65
 tok/s; ours is 110.8 on a different, larger MoE. Comparing them directly
-double-counts the difference in the model, not the hardware.
+double-counts the difference in the model, not the hardware. The widely
+circulated "201–219 tok/s on a V100" falls in this bucket and then some —
+different model, self-written engine, and a verbatim-recopy prompt condition.
+It appears in no table on this page.
 
 **Context depth changes everything.** On one V100 32GB with llama.cpp and
 Q4_K_M, decode runs 65.07 tok/s at 1K and 42.22 tok/s at 128K. Any table
