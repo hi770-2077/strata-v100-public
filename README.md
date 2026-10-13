@@ -71,8 +71,8 @@
 | 10-09 | 切 GSQ-RCO 量化档（社区优化版） | 91.69 | 关思考 8×512 中值 |
 | 10-09 | `--mtp-hnorm stream` + `--host-core last` | **190.3 峰值** | 峰值口径，172 中位 |
 | 10-10 | v0.1.41 + `STRATA_SM70_TABLE=1` | **203.1 峰值** | 同口径 +6.7%，首破 200 |
-| 10-11 | 128G 内存 + 风扇 PWM 200 | prefill +8~53% | decode 持平（专家已 100% 驻显存） |
-| 10-13 | `--layer-split 25` + `--mtp-q4 all` | 107→110 | 4.7% + 2.4% 两轮叠加 |
+| 10-11 | 128G 内存 + 风扇 PWM 200 | prefill +8~53% | decode 持平（专家已 100% 驻显存）；掉速真凶是风扇，见 [`docs/memory-and-thermals.md`](docs/memory-and-thermals.md) |
+| 10-13 | `--layer-split 25` + `--mtp-q4 all` | 107→110 | 4.7% + 2.4% 两轮叠加；同轮切 v0.1.43（A/B 持平，为 NaN guard），见 [`docs/engine-upgrade-notes.md`](docs/engine-upgrade-notes.md) |
 
 **注意 10-11 那一行：加内存让 prefill 涨 8~10%、加载快 38%，decode 一点没动。**
 原因不是白花钱 —— 专家早已 100% 驻留显存，decode 主路径根本不读内存。
