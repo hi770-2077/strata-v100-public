@@ -1,0 +1,419 @@
+{
+  "measured_at": "2026-10-13 23:00:15",
+  "health_8080": {
+    "status": "ok",
+    "max_context": 262144,
+    "model": "sc117-flash-next-abliterated-iq3_s-256k-vision",
+    "images": true,
+    "api_key": true,
+    "loaded": true,
+    "service": "strata"
+  },
+  "health_8081": {
+    "status": "ok",
+    "max_context": 262144,
+    "model": "sc117-flash-next-abliterated-iq3_s-256k-vision",
+    "images": true,
+    "api_key": true,
+    "loaded": true,
+    "service": "strata"
+  },
+  "gpu_before": [
+    "Tesla V100-PCIE-32GB, 30652, 32768, 0, 41, 43.52",
+    "Tesla V100-PCIE-32GB, 30976, 32768, 0, 41, 44.90"
+  ],
+  "suites": {
+    "decode_steady": {
+      "desc": "短 prompt + 512 输出：稳态 decode",
+      "summary": {
+        "prefill_tok_s_median": 142.3,
+        "decode_tok_s_median": 110.8,
+        "prefill_tok_s_all": [
+          137.7,
+          142.3,
+          143.5
+        ],
+        "decode_tok_s_all": [
+          104.6,
+          110.8,
+          112.3
+        ],
+        "mtp_accept_rate_median": 0.88,
+        "prompt_tokens": 72,
+        "output_tokens": 85,
+        "wall_s_median": 1.72
+      },
+      "runs": [
+        {
+          "wall_s": 1.344,
+          "prompt_tokens": 72,
+          "output_tokens": 85,
+          "prefill_tok_s": 137.7,
+          "decode_tok_s": 104.6,
+          "prefill_ms": 523.0,
+          "decode_ms": 812.9,
+          "cached_tokens": 0,
+          "mtp_draft_n": 49,
+          "mtp_accepted": 42,
+          "mtp_accept_rate": 0.857,
+          "round": 1
+        },
+        {
+          "wall_s": 1.724,
+          "prompt_tokens": 72,
+          "output_tokens": 134,
+          "prefill_tok_s": 142.3,
+          "decode_tok_s": 110.8,
+          "prefill_ms": 505.9,
+          "decode_ms": 1209.2,
+          "cached_tokens": 0,
+          "mtp_draft_n": 67,
+          "mtp_accepted": 60,
+          "mtp_accept_rate": 0.896,
+          "round": 2
+        },
+        {
+          "wall_s": 1.73,
+          "prompt_tokens": 72,
+          "output_tokens": 137,
+          "prefill_tok_s": 143.5,
+          "decode_tok_s": 112.3,
+          "prefill_ms": 501.7,
+          "decode_ms": 1219.5,
+          "cached_tokens": 0,
+          "mtp_draft_n": 69,
+          "mtp_accepted": 61,
+          "mtp_accept_rate": 0.884,
+          "round": 3
+        }
+      ]
+    },
+    "longgen_2k_1024": {
+      "desc": "2K prompt + 1024 输出：长回答场景",
+      "summary": {
+        "prefill_tok_s_median": 997.6,
+        "decode_tok_s_median": 95.7,
+        "prefill_tok_s_all": [
+          998.5,
+          997.6,
+          993.6
+        ],
+        "decode_tok_s_all": [
+          95.7,
+          99.5,
+          91.7
+        ],
+        "mtp_accept_rate_median": 0.91,
+        "prompt_tokens": 2364,
+        "output_tokens": 537,
+        "wall_s_median": 7.99
+      },
+      "runs": [
+        {
+          "wall_s": 7.992,
+          "prompt_tokens": 2364,
+          "output_tokens": 537,
+          "prefill_tok_s": 998.5,
+          "decode_tok_s": 95.7,
+          "prefill_ms": 2367.5,
+          "decode_ms": 5613.9,
+          "cached_tokens": 0,
+          "mtp_draft_n": 194,
+          "mtp_accepted": 177,
+          "mtp_accept_rate": 0.912,
+          "round": 1
+        },
+        {
+          "wall_s": 6.26,
+          "prompt_tokens": 2364,
+          "output_tokens": 386,
+          "prefill_tok_s": 997.6,
+          "decode_tok_s": 99.5,
+          "prefill_ms": 2369.7,
+          "decode_ms": 3879.5,
+          "cached_tokens": 0,
+          "mtp_draft_n": 153,
+          "mtp_accepted": 144,
+          "mtp_accept_rate": 0.941,
+          "round": 2
+        },
+        {
+          "wall_s": 8.902,
+          "prompt_tokens": 2364,
+          "output_tokens": 597,
+          "prefill_tok_s": 993.6,
+          "decode_tok_s": 91.7,
+          "prefill_ms": 2379.3,
+          "decode_ms": 6511.4,
+          "cached_tokens": 0,
+          "mtp_draft_n": 210,
+          "mtp_accepted": 188,
+          "mtp_accept_rate": 0.895,
+          "round": 3
+        }
+      ]
+    },
+    "prefill_13k": {
+      "desc": "12.9K prompt + 64 输出：prefill 主导",
+      "summary": {
+        "prefill_tok_s_median": 1704.3,
+        "decode_tok_s_median": 92.4,
+        "prefill_tok_s_all": [
+          1713.2,
+          1702.7,
+          1704.3
+        ],
+        "decode_tok_s_all": [
+          92.4,
+          106.3,
+          90.0
+        ],
+        "mtp_accept_rate_median": 0.93,
+        "prompt_tokens": 14876,
+        "output_tokens": 64,
+        "wall_s_median": 9.4
+      },
+      "runs": [
+        {
+          "wall_s": 9.398,
+          "prompt_tokens": 14876,
+          "output_tokens": 64,
+          "prefill_tok_s": 1713.2,
+          "decode_tok_s": 92.4,
+          "prefill_ms": 8683.2,
+          "decode_ms": 692.4,
+          "cached_tokens": 0,
+          "mtp_draft_n": 22,
+          "mtp_accepted": 20,
+          "mtp_accept_rate": 0.909,
+          "round": 1
+        },
+        {
+          "wall_s": 9.361,
+          "prompt_tokens": 14876,
+          "output_tokens": 64,
+          "prefill_tok_s": 1702.7,
+          "decode_tok_s": 106.3,
+          "prefill_ms": 8736.6,
+          "decode_ms": 601.9,
+          "cached_tokens": 0,
+          "mtp_draft_n": 29,
+          "mtp_accepted": 27,
+          "mtp_accept_rate": 0.931,
+          "round": 2
+        },
+        {
+          "wall_s": 9.463,
+          "prompt_tokens": 14876,
+          "output_tokens": 64,
+          "prefill_tok_s": 1704.3,
+          "decode_tok_s": 90.0,
+          "prefill_ms": 8728.7,
+          "decode_ms": 710.8,
+          "cached_tokens": 0,
+          "mtp_draft_n": 15,
+          "mtp_accepted": 15,
+          "mtp_accept_rate": 1.0,
+          "round": 3
+        }
+      ]
+    },
+    "prefill_32k": {
+      "desc": "32K prompt + 64 输出：长上下文 prefill",
+      "summary": {
+        "prefill_tok_s_median": 1817.2,
+        "decode_tok_s_median": 85.4,
+        "prefill_tok_s_all": [
+          1835.4,
+          1812.9,
+          1817.2
+        ],
+        "decode_tok_s_all": [
+          85.4,
+          79.5,
+          91.2
+        ],
+        "mtp_accept_rate_median": 0.73,
+        "prompt_tokens": 36864,
+        "output_tokens": 64,
+        "wall_s_median": 21.03
+      },
+      "runs": [
+        {
+          "wall_s": 20.877,
+          "prompt_tokens": 36864,
+          "output_tokens": 64,
+          "prefill_tok_s": 1835.4,
+          "decode_tok_s": 85.4,
+          "prefill_ms": 20084.5,
+          "decode_ms": 749.6,
+          "cached_tokens": 0,
+          "mtp_draft_n": 37,
+          "mtp_accepted": 27,
+          "mtp_accept_rate": 0.73,
+          "round": 1
+        },
+        {
+          "wall_s": 21.182,
+          "prompt_tokens": 36864,
+          "output_tokens": 64,
+          "prefill_tok_s": 1812.9,
+          "decode_tok_s": 79.5,
+          "prefill_ms": 20333.8,
+          "decode_ms": 804.7,
+          "cached_tokens": 0,
+          "mtp_draft_n": 30,
+          "mtp_accepted": 19,
+          "mtp_accept_rate": 0.633,
+          "round": 2
+        },
+        {
+          "wall_s": 21.03,
+          "prompt_tokens": 36864,
+          "output_tokens": 64,
+          "prefill_tok_s": 1817.2,
+          "decode_tok_s": 91.2,
+          "prefill_ms": 20286.3,
+          "decode_ms": 702.1,
+          "cached_tokens": 0,
+          "mtp_draft_n": 37,
+          "mtp_accepted": 29,
+          "mtp_accept_rate": 0.784,
+          "round": 3
+        }
+      ]
+    },
+    "proxy_compare": {
+      "desc": "同一 12.9K prompt 重复 3 次，8081 应命中前缀缓存",
+      "engine_8080": [
+        {
+          "wall_s": 9.521,
+          "prompt_tokens": 14876,
+          "output_tokens": 64,
+          "prefill_tok_s": 1668.6,
+          "decode_tok_s": 109.9,
+          "prefill_ms": 8915.1,
+          "decode_ms": 582.5,
+          "cached_tokens": 0,
+          "mtp_draft_n": 28,
+          "mtp_accepted": 28,
+          "mtp_accept_rate": 1.0,
+          "round": 1
+        },
+        {
+          "wall_s": 0.738,
+          "prompt_tokens": 5,
+          "output_tokens": 64,
+          "prefill_tok_s": 36.6,
+          "decode_tok_s": 110.6,
+          "prefill_ms": 136.5,
+          "decode_ms": 578.5,
+          "cached_tokens": 14871,
+          "mtp_draft_n": 28,
+          "mtp_accepted": 28,
+          "mtp_accept_rate": 1.0,
+          "round": 2
+        },
+        {
+          "wall_s": 0.732,
+          "prompt_tokens": 5,
+          "output_tokens": 64,
+          "prefill_tok_s": 37.9,
+          "decode_tok_s": 110.8,
+          "prefill_ms": 131.9,
+          "decode_ms": 577.4,
+          "cached_tokens": 14871,
+          "mtp_draft_n": 28,
+          "mtp_accepted": 28,
+          "mtp_accept_rate": 1.0,
+          "round": 3
+        }
+      ],
+      "proxy_8081": [
+        {
+          "wall_s": 0.741,
+          "prompt_tokens": 5,
+          "output_tokens": 64,
+          "prefill_tok_s": 37.7,
+          "decode_tok_s": 109.9,
+          "prefill_ms": 132.7,
+          "decode_ms": 582.2,
+          "cached_tokens": 14871,
+          "mtp_draft_n": 28,
+          "mtp_accepted": 28,
+          "mtp_accept_rate": 1.0,
+          "round": 1
+        },
+        {
+          "wall_s": 0.738,
+          "prompt_tokens": 5,
+          "output_tokens": 64,
+          "prefill_tok_s": 36.5,
+          "decode_tok_s": 110.8,
+          "prefill_ms": 136.9,
+          "decode_ms": 577.8,
+          "cached_tokens": 14871,
+          "mtp_draft_n": 28,
+          "mtp_accepted": 28,
+          "mtp_accept_rate": 1.0,
+          "round": 2
+        },
+        {
+          "wall_s": 0.738,
+          "prompt_tokens": 5,
+          "output_tokens": 64,
+          "prefill_tok_s": 37.6,
+          "decode_tok_s": 110.7,
+          "prefill_ms": 132.9,
+          "decode_ms": 578.3,
+          "cached_tokens": 14871,
+          "mtp_draft_n": 28,
+          "mtp_accepted": 28,
+          "mtp_accept_rate": 1.0,
+          "round": 3
+        }
+      ],
+      "summary_8080": {
+        "prefill_tok_s_median": 37.9,
+        "decode_tok_s_median": 110.6,
+        "prefill_tok_s_all": [
+          1668.6,
+          36.6,
+          37.9
+        ],
+        "decode_tok_s_all": [
+          109.9,
+          110.6,
+          110.8
+        ],
+        "mtp_accept_rate_median": 1.0,
+        "prompt_tokens": 14876,
+        "output_tokens": 64,
+        "wall_s_median": 0.74
+      },
+      "summary_8081": {
+        "prefill_tok_s_median": 37.6,
+        "decode_tok_s_median": 110.7,
+        "prefill_tok_s_all": [
+          37.7,
+          36.5,
+          37.6
+        ],
+        "decode_tok_s_all": [
+          109.9,
+          110.8,
+          110.7
+        ],
+        "mtp_accept_rate_median": 1.0,
+        "prompt_tokens": 5,
+        "output_tokens": 64,
+        "wall_s_median": 0.74
+      },
+      "prefill_speedup": 0.99
+    }
+  },
+  "gpu_after": [
+    "Tesla V100-PCIE-32GB, 30652, 32768, 0, 56, 50.09",
+    "Tesla V100-PCIE-32GB, 30976, 32768, 0, 57, 53.03"
+  ]
+}

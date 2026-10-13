@@ -74,7 +74,22 @@ fit_max_tokens
 reasoning_budget_tokens 16384
 ```
 
-实测：**decode ~110 tok/s · 长生成 ~107-111 tok/s · prompt 1127 tok/s**
+实测（2026-10-13 生产服务，四档场景每档 3 轮中位数）：
+
+**decode ~110 tok/s**（短上下文）· **prefill 1 704 tok/s**（14.9K prompt）
+
+四档完整数据、原始 JSON 与测量坑见 [`benchmarks.md`](benchmarks.md)。简表：
+
+| 场景 | prefill | decode | MTP 接受率 |
+|---|---|---|---|
+| 72 tok prompt | 142 tok/s | 110.8 tok/s | 0.88 |
+| 2.4K prompt | 997.6 tok/s | 95.7 tok/s | 0.91 |
+| 14.9K prompt | 1 704 tok/s | 92.4 tok/s | 0.93 |
+| 36.9K prompt | 1 817 tok/s | 85.4 tok/s | **0.73** |
+
+**这张表解释了本台账的形状**：prefill 是 decode 的 16 倍，所以
+「让乘法更快」的改动（WMMA、算子优化）能在 prefill 上拿到几个百分点，
+却在带宽瓶颈的 decode 上全部归零 —— 这就是下面 10 条证伪项里大多数的共同原因。
 
 > 注：这是我们这台机器的最优点，**不是通用最优解**。你的硬件拓扑、模型、上下文长度不同，
 > 数字会不一样。`--layer-split` 和 `--mtp-q4` 这类与显存布局强相关的尤其要自己重扫。

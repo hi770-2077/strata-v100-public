@@ -11,6 +11,36 @@
 
 ---
 
+## 我们这台机器现在能跑多快
+
+2026-10-13 实测**生产服务**（不是离线跑分），双 V100-32GB / PCIe 无 NVLink /
+Qwen3.8-Flash-Next IQ3_S。每档 3 轮取中位数，**每轮换不同 prompt** 防止命中前缀缓存：
+
+| 场景 | Prompt | 输出 | **prefill** | **decode** | MTP 接受率 |
+|---|---|---|---|---|---|
+| 日常对话 | 72 | 85–137 | 142 tok/s | **110.8 tok/s** | 0.88 |
+| 长回答 | 2 364 | 386–597 | **997.6 tok/s** | 95.7 tok/s | 0.91 |
+| 长提示词 | 14 876 | 64 | **1 704 tok/s** | 92.4 tok/s | 0.93 |
+| 超长上下文 | 36 864 | 64 | **1 817 tok/s** | 85.4 tok/s | 0.73 |
+
+三个从数字里直接读出来的结论：
+
+- **prefill 比 decode 快约 16 倍**（1 817 vs 110.8）。prefill 吃算力、decode 吃带宽，
+  这个不对称决定了下面所有取舍。
+- **36K 上下文时 MTP 接受率掉到 0.73**（短上下文 0.88–0.93）。上下文越长猜得越不准，
+  收益被拒稿吃掉 —— 所以我们生产上把 MTP 窗口和 `reasoning_budget` 都设了上限。
+- **前缀缓存的收益比任何 flag 调优大两个数量级**：重发同一段 12.9K 提示词，
+  `prompt_tokens` 从 14 876 掉到 **5**，耗时从 ~9.4 s 掉到 ~37 ms（**254×**）。
+  我们折腾的所有内核/开关加起来都远不到这个量级。
+
+完整环境配置、每一轮原始数据、以及**五个踩过的测量坑**（含"缓存前缀会悄悄毁掉你的跑分"
+这个真实翻车），见 [`docs/benchmarks.md`](docs/benchmarks.md)。
+
+> ⚠️ 这是**我们这台机器的最优点，不是通用最优解**。无 NVLink 是这套数字的前提之一；
+> 有 NVLink 或换模型/换量化格式，结论都要重测。
+
+---
+
 ## 先读这一段（术语速查）
 
 没接触过 Strata / llama.cpp 内核也能读懂后面的一切：
@@ -27,7 +57,7 @@
 | **layer-split（层切分）** | 双卡跑一个模型：卡 A 算 1-25 层，卡 B 算 26-48 层，像流水线一样接力。 |
 | **专家常驻（resident）** | 把 512 个专家全部放进显存，不够就淘汰。我们的配置下全部装得下。 |
 | **tok/s** | 每秒生成多少个 token。**prompt tok/s** 和 **decode tok/s** 是两回事，别混。 |
-| **MTP / 投机解码** | 让模型先猜几个 token 再验证，用"猜错的代价小"换吞吐。我们的场景接受率约 90%。 |
+| **MTP / 投机解码** | 让模型先猜几个 token 再验证，用"猜错的代价小"换吞吐。我们的场景接受率约 90%（36K 上下文时掉到 0.73）。 |
 
 ---
 
@@ -122,6 +152,7 @@ STRATA_KEY=xxx STRATA_URL=http://127.0.0.1:8080 python3 scripts/bench_prompt.py
 
 ## 更多内容
 
+- [`docs/benchmarks.md`](docs/benchmarks.md) — **生产环境实测速度**：四档场景的 prefill/decode/MTP 数据、原始 JSON、以及五个测量坑
 - [`docs/multigpu-wmma-bug.md`](docs/multigpu-wmma-bug.md) — 多卡 bug 的完整分析与补丁说明
 - [`docs/flag-ledger.md`](docs/flag-ledger.md) — 19 个开关的完整台账与证伪原因
 - [`docs/multi-gpu-and-interconnect.md`](docs/multi-gpu-and-interconnect.md) — 单卡/双卡/三卡/四卡 + NVLink 的建议矩阵
