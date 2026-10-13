@@ -301,6 +301,7 @@ STRATA_KEY=xxx STRATA_URL=http://127.0.0.1:8080 python3 scripts/bench_prompt.py
 - [`docs/auditing-ai-tuning-plans.md`](docs/auditing-ai-tuning-plans.md) — **如何审计一份 AI 生成的调优方案**：14 个参数 11 个查无此物；「改专家数造四档模型」为什么物理不存在；相似匹配缓存为什么对 Agent 是系统性错误源
 - [`docs/client-call-patterns.md`](docs/client-call-patterns.md) — **调用姿势 4.19×**：同一个缓存机制，写法不对复用率就是 0%；另附 2,048 token checkpoint 门槛实测
 - [`docs/community-comparison.md`](docs/community-comparison.md) — **与社区数据的横向对比**：带出处链接、同一模型/引擎的对照表、四个容易误读的陷阱
+- [`docs/ninfer-teardown.md`](docs/ninfer-teardown.md) — **拆解别人的 219 tok/s**：三层解构（合成语料峰值 vs 真实文本曲线 vs lossless fast path）、六个机制逐条评级，其中两项已排进我们的测试队列
 - [`docs/multigpu-wmma-bug.md`](docs/multigpu-wmma-bug.md) — 多卡 bug 的完整分析与补丁说明
 - [`docs/flag-ledger.md`](docs/flag-ledger.md) — 23 个开关的完整台账与证伪原因
 - [`docs/multi-gpu-and-interconnect.md`](docs/multi-gpu-and-interconnect.md) — 单卡/双卡/三卡/四卡 + NVLink 的建议矩阵
