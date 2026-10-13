@@ -1,4 +1,4 @@
-# 19 个调优开关的完整台账
+# 21 个调优开关的完整台账
 
 > 硬件：2× Tesla V100-PCIE-32GB（GV100GL, sm_70），驱动 580.178.04，CUDA 12.8
 > 模型：Qwen3.8-Flash-Next GSQ-RCO-abliterated IQ3_S（48 层 / 512 专家 top-10 / GDN+QSA 混合 / PLE n-gram 层）
@@ -8,10 +8,12 @@
 
 ---
 
-## 采纳（9 项，生产在跑）
+## 采纳（11 项，生产在跑）
 
 | 开关 | 收益 | 实测依据与机制 |
 |---|---|---|
+| `--mtp-hnorm stream` | **峰值 +3.7%**（190.3 那一档的关键项） | Qwen4exp MTP 图里 `pre_fc_norm_hidden` 逐流归一化（默认 `pooled` 是四条流一起做一次 RMS）。接受率 +1.5pp。**注意：很多人以为 `--spec-min-p 0.5→0.8` 的增量是它的功劳，实测 0.70 在噪声内，真正的增量来自这一项** |
+| `--host-core last` | **峰值 +6.5%**（191.4 首破 190 的来源） | host 线程挪到最后一个物理核。Windows 把 GPU 中断发给第一个逻辑核，自旋等待的 host 线程会被打断。中位只有 +1.0%（噪声边缘），但峰值显著 |
 | `STRATA_SM70_TABLE=1` | decode **+5.7%** | v0.1.41 引入的 sm_70 专用解码三件套：expert mode 8 + `mmvq_il` Volta rows 表 + `gr_fast`，每window GPU 时间 −6.8%，输出 bitwise 不变。上游因无 V100 机器保持 opt-in。**不开只有 99.61 tok/s，落在噪声内** |
 | `--layer-split 25` | decode **+4.7%**（vs 24）；长生成 **+8.5%** | 逐层扫描 23=99.43 / 24=102.88 / **25=107.27** / 26=107.01 tok/s。卡 0 还背 vision encoder，25/26 是平台期，取 25。**双卡 94% 时间同忙，切分不均** |
 | `STRATA_PF_WMMA=2` | prompt **+4.1~4.3%**（1127/1127 vs 1081/1082） | down-only WMMA 混合，自研模式。全网首个 IQ3_S gate/up 的 WMMA 数据点。parity 8 格式全过 |
@@ -21,6 +23,11 @@
 | `--expert-cache auto` | 专家 **100%** 显存常驻（11776/11776） | 双卡装得下所有专家 → "减少等miss"类优化理论增益为 0 |
 | `fit_max_tokens` | 正确性护栏 | `max_tokens` 超剩余上下文时自动收缩（原来直接 400） |
 | `reasoning_budget_tokens 16384` | 正确性护栏 | 思考硬上限 16K |
+
+> ⚠️ **前两项（`--mtp-hnorm` / `--host-core`）的收益集中在峰值口径，中位口径分别只有
+> +1.0% 左右（噪声边缘）。** 它们的价值是「把上限推高」，不是「把日常体验推高」。
+> 报这两个数字时必须同时说明口径，否则读者会误以为日常也能拿到 +3.7%/+6.5%。
+> 详见 [`calibers.md`](calibers.md)。
 
 ---
 

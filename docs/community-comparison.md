@@ -33,7 +33,31 @@ We do **not** lead the field. Newer or better-connected hardware beats us, and
 one shortcoming is structural rather than fixable by tuning — see
 [Where we fall short](#where-we-fall-short).
 
+### ⚠️ Which of our numbers is 110.8?
+
+**110.8 is our *chat* caliber — thinking enabled, 72-token prompt, median of 3 on
+the live production service.** It is deliberately the most conservative of the
+five calibers we publish, because it is the one that describes what a user
+actually experiences.
+
+The same machine, same model, same parameters, also produces:
+
+| Caliber | Decode | Conditions |
+|---|---:|---|
+| Peak (stream-scrape) | **203.1** | thinking off, structured benchmark, short context |
+| Real agent-task median | **159.2** | last 12 real production requests |
+| **Chat (our headline)** | **110.8** | **thinking on, 72-token prompt** |
+| 256K full context | **87.4** | generate after a 260K-token prompt |
+
+Publishing only 203.1 would have been selecting the most flattering of five
+true numbers. Full definitions, reproduction scripts, and why cross-caliber
+comparison is invalid are in [`calibers.md`](calibers.md) — **a decode number
+without a caliber is not a number**, and that applies to every figure below.
+
 ## Like-for-like: same model, same quant, Strata engine
+
+All rows below are the *chat* caliber unless noted. Where a source does not
+state its caliber, we say so.
 
 | Configuration | Decode tok/s | Prefill tok/s | Source |
 |---|---:|---:|---|
@@ -127,12 +151,10 @@ numbers diverge by much more. That is the same compute-bound vs
 bandwidth-bound split we measured — MoE decode is memory-bound, so card
 generation matters far less than bandwidth.
 
-## The fastest V100 decode number we found — and why it is not ours
+## The fastest V100 decode numbers we found — and where ours sits
 
-People searching "V100 decode tok/s" will eventually hit **201–219 tok/s**. That
-number belongs to a different project, **NInfer** (`geowatts/gw`), and it is
-honest to say so plainly rather than quietly leave it out or, worse, quietly
-bank it:
+People searching "V100 decode tok/s" eventually hit **201–219 tok/s**. Here is
+the full picture, with each number's owner and conditions made explicit:
 
 | | This repository | NInfer |
 |---|---|---|
@@ -140,19 +162,30 @@ bank it:
 | Model | Qwen3.8-Flash-Next **MoE**, 48 layers / 512 experts | Qwen3.8 **27B dense** |
 | Quantization | IQ3_S (GGUF) | Software-emulated **NVFP4** |
 | Cards | 2× V100-32GB, PCIe, no NVLink | **1×** V100 |
-| Headline decode | **110.8 tok/s** | **201–219 tok/s** |
+| Headline decode | **203.1 peak** / 110.8 chat | **201–219** |
+| Condition | stream-scrape, thinking off, structured benchmark, short context | 172-token **verbatim-copy prompt** — documented by that project as a "context-reproduction fast path" |
 
-Every one of those five variables differs. The 201.0 tok/s figure is measured on
-a 172-token **verbatim-copy prompt**, which that project documents as a
-"context-reproduction fast path" — a different workload from real generation, and
-the reason it does not transfer to our numbers. Their maintainer log also shows
+Every one of those five variables differs. Their maintainer log also shows
 169–190 tok/s on longer, more realistic prompts.
 
-We list it as the **ceiling for this hardware class**: it says a single V100 has
-roughly twice our per-card headroom left on the table, reachable only by leaving
-GGUF and Strata behind. It is a target, not a score. Anyone comparing our 110.8
-against 219 without reading this section would be comparing different engines,
-different models, different numeric formats and different workloads.
+**How to read this honestly:**
+
+- **Our 203.1 and their 219 are the same order of magnitude, on the same card
+  class.** That is not a coincidence — it says the V100 has roughly this much
+  headroom in total, and both projects found most of it.
+- **The paths are not interchangeable.** We got there by patching an existing
+  engine (Volta-specific kernels, MTP draft-head tuning, host-core placement).
+  They got there by writing an engine from scratch and emulating a numeric
+  format in software. Our route is reproducible by anyone with a V100 and a
+  checkout; theirs requires a new engine.
+- **We do not claim their number, and they should not be credited with ours.**
+  Anyone comparing our 110.8 against 219 without reading this section would be
+  comparing different engines, different models, different numeric formats, and
+  different workloads — four mismatches at once.
+
+We list it as the **ceiling for this hardware class**: a single V100 has roughly
+twice our per-card headroom left on the table, reachable only by leaving GGUF
+and Strata behind. It is a target, not a score.
 
 ## Where we fall short
 
@@ -175,9 +208,15 @@ which is close to our 1 704 at 14.9K despite half the VRAM. If that holds up, it
 suggests our prefill is limited by cross-card transfer rather than by the cards
 themselves. We have not reproduced it, so we record it as a lead, not a claim.
 
-## Three ways these comparisons mislead
+## Four ways these comparisons mislead
 
-**Model identity first.** Most V100 reports online are for **Qwen3.8-27B**, a
+**Caliber mismatch — the one nobody checks.** A decode number without its
+thinking state, task type, context depth, and instant-vs-median is not a number.
+On this very machine, the same config reads 87.4 and 203.1 depending on those
+four choices. If a source does not state its caliber, treat its figure as
+unusable for comparison. See [`calibers.md`](calibers.md).
+
+**Model identity.** Most V100 reports online are for **Qwen3.8-27B**, a
 dense 27B model, not our 125B-class MoE. Dense-27B figures cluster at 23–65
 tok/s; ours is 110.8 on a different, larger MoE. Comparing them directly
 double-counts the difference in the model, not the hardware.
