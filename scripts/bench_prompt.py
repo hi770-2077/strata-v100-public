@@ -9,7 +9,7 @@ KEY = os.environ.get("STRATA_KEY", "")
 if not KEY:
     sys.exit("STRATA_KEY env required (this repo ships no default key)")
 URL = os.environ.get("STRATA_URL", "http://127.0.0.1:8081/v1/chat/completions")
-MODEL = os.environ.get("STRATA_MODEL", "sc117-flash-next-abliterated-iq3_s-256k-vision")
+MODEL = os.environ.get("STRATA_MODEL", "qwen3.8-flash-next-gsq-rco-iq3_s-256k")
 
 PARA = ("请用中文写一篇关于分布式推理引擎 MoE 专家缓存设计的详细技术分析，"
         "内容包括：专家路由的 top-k 选择策略、显存与主机内存的分层管理、"

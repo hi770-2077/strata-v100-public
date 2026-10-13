@@ -8,7 +8,7 @@ KEY = os.environ.get("STRATA_KEY", "")
 if not KEY:
     sys.exit("STRATA_KEY env required (this repo ships no default key)")
 URL = os.environ.get("STRATA_URL", "http://127.0.0.1:8081/v1/chat/completions")
-MODEL = os.environ.get("STRATA_MODEL", "sc117-flash-next-abliterated-iq3_s-256k-vision")
+MODEL = os.environ.get("STRATA_MODEL", "qwen3.8-flash-next-gsq-rco-iq3_s-256k")
 
 def chat(messages, max_tokens, tag):
     body = json.dumps({

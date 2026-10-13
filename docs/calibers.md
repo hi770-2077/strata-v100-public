@@ -72,7 +72,7 @@ length. **A decode number without a caliber is not a number.**
 | A/B median | `decode_bench.py` | `reasoning_effort=none`, warmup 1×256 then 5×512 |
 | Real-task median | `curl /v1/metrics` | Take the last 12 requests, not the best |
 | Chat | `bench-production.py` | Thinking on, fresh prompt per round |
-| Long context | `longctx_sc117.py` | Unique salt prefix per tier |
+| Long context | `longctx_ctx.py` | Unique salt prefix per tier |
 
 **Warm up first.** A cold first run measures ~55 tok/s and drags the median down
 by five points. Standard procedure is warmup 1×256, then the measured runs.

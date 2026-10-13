@@ -29,7 +29,7 @@
 ## 本仓库的实测环境
 
 2× Tesla V100-PCIE-32GB（GV100GL, sm_70）· 驱动 580.178.04 · CUDA 12.8 · CachyOS(x86_64)
-模型：Qwen3.8-Flash-Next GSQ-RCO-abliterated IQ3_S（48 层 / 512 专家 top-10 / GDN+QSA 混合）
+模型：Qwen3.8-Flash-Next GSQ-RCO IQ3_S（社区优化量化档；48 层 / 512 专家 top-10 / GDN+QSA 混合）
 
 ## 引用规范
 

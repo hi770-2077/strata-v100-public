@@ -6,9 +6,9 @@ VAL="${1:?usage: pfwmma_ab_time.sh <0|1|2>}"
 : "${STRATA_KEY:?STRATA_KEY env required (this repo ships no default key)}"
 KEY="$STRATA_KEY"
 echo "--- arm STRATA_PF_WMMA=$VAL (+PREFILL_TIMING) ---"
-printf '[Service]\nEnvironment="STRATA_PF_WMMA=%s"\nEnvironment="STRATA_PREFILL_TIMING=1"\n' "$VAL" | sudo -n tee /etc/systemd/system/strata-sc117.service.d/zz-pfwmma.conf > /dev/null
+printf '[Service]\nEnvironment="STRATA_PF_WMMA=%s"\nEnvironment="STRATA_PREFILL_TIMING=1"\n' "$VAL" | sudo -n tee /etc/systemd/system/strata-v100.service.d/zz-pfwmma.conf > /dev/null
 sudo -n systemctl daemon-reload
-sudo -n systemctl restart strata-sc117
+sudo -n systemctl restart strata-v100
 for i in $(seq 1 60); do
   sleep 5
   code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 -H "Authorization: Bearer $KEY" http://127.0.0.1:8080/v1/models 2>/dev/null)

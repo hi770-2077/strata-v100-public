@@ -68,7 +68,7 @@
 | 起点 | 社区单卡基线 | 33.5 | 参照系 |
 | 10-07 | 起点（双卡未调） | 69.87 | |
 | 10-08 | `--layer-split 24` + `--lookup-chain 4` | 88.12 | 见下方「三个发现」 |
-| 10-09 | 切 SC117 GSQ-RCO 量化档 | 91.69 | 关思考 8×512 中值 |
+| 10-09 | 切 GSQ-RCO 量化档（社区优化版） | 91.69 | 关思考 8×512 中值 |
 | 10-09 | `--mtp-hnorm stream` + `--host-core last` | **190.3 峰值** | 峰值口径，172 中位 |
 | 10-10 | v0.1.41 + `STRATA_SM70_TABLE=1` | **203.1 峰值** | 同口径 +6.7%，首破 200 |
 | 10-11 | 128G 内存 + 风扇 PWM 200 | prefill +8~53% | decode 持平（专家已 100% 驻显存） |
@@ -103,7 +103,7 @@ fast path。我们不冒领别人的数字，列在这里只作天花板参照 �
 `--layer-split 25` + 专家 100% 常驻已经把这台机器榨到接近上限，换成 NVLink 机器或
 更大显存的卡，prefill 还能再上一个台阶（社区 4–6 卡 V100 带 NVLink 报到
 **7 357 tok/s prompt**，是我们 1 817 的 4 倍）。但**在没有 NVLink 的机器上，
-下面这套配置就是接近最优的解** —— 21 个开关我们全试过，采纳 11 个、证伪 10 个。
+下面这套配置就是接近最优的解** —— 22 个开关我们全试过，采纳 12 个、证伪 10 个。
 
 三个从数字里直接读出来的结论：
 
@@ -126,6 +126,12 @@ fast path。我们不冒领别人的数字，列在这里只作天花板参照 �
 **为什么同一个配置有五个速度数字、以及每个口径怎么测**，见
 [`docs/calibers.md`](docs/calibers.md) —— 这是本项目最核心的一条测量纪律：
 一个不带口径的 decode 数字不是数字。
+
+**这些数字是怎么一个个试出来的**：22 个开关跑了 7 轮，其中 **6 次我们自己的初始假设
+被自己的数据杀死**（"降频 = 散热不够" → 锁 1250 反而更慢；"并发一定更快" → 4 并发比
+单请求慢；"内存大一定快" → decode 完全持平）。完整的自我推翻记录 + 六步可复用实验协议见
+[`docs/methodology.md`](docs/methodology.md) ——
+**一个什么都没采纳的调优 session 不是浪费的 session；一个不知道为什么采纳的才是。**
 
 **我们的短板也写在这**：prefill 1 704 vs 带 NVLink 多卡 V100 的 7 357，差 4 倍。
 原因是这台机器两张卡走 PCIe 无 NVLink，层切分时每个 token 都要跨总线。
@@ -241,9 +247,9 @@ IQ3_S 的 256 宽 superblock 反量化本身就不便宜，扔到 tensor core �
 
 ---
 
-## 21 个调优开关的完整台账
+## 22 个调优开关的完整台账
 
-**采纳 11 个**（生产在跑）：
+**采纳 12 个**（生产在跑）：
 
 | 开关 | 收益 | 说明 |
 |---|---|---|
@@ -293,9 +299,11 @@ STRATA_KEY=xxx STRATA_URL=http://127.0.0.1:8080 python3 scripts/bench_prompt.py
 
 - [`docs/benchmarks.md`](docs/benchmarks.md) — **生产环境实测速度**：四档场景的 prefill/decode/MTP 数据、原始 JSON、以及五个测量坑
 - [`docs/calibers.md`](docs/calibers.md) — **口径分层方法论**：同一台机器为什么有五个不同的 tok/s（87~203），每个口径怎么测、什么时候用、为什么不能跨口径比
-- [`docs/community-comparison.md`](docs/community-comparison.md) — **与社区数据的横向对比**：带出处链接、同一模型/引擎的对照表、三个容易误读的陷阱
+- [`docs/methodology.md`](docs/methodology.md) — **七个 Loop 六次推翻自己的初始假设**：一条优化假设怎么被数据杀死，以及六步可复用的实验协议
+- [`docs/llamacpp-engine-comparison.md`](docs/llamacpp-engine-comparison.md) — **同机同模型换引擎**：prefill 28.7→427.6 tok/s（14.9×），瓶颈真身是 embedding 的放置位置
+- [`docs/community-comparison.md`](docs/community-comparison.md) — **与社区数据的横向对比**：带出处链接、同一模型/引擎的对照表、四个容易误读的陷阱
 - [`docs/multigpu-wmma-bug.md`](docs/multigpu-wmma-bug.md) — 多卡 bug 的完整分析与补丁说明
-- [`docs/flag-ledger.md`](docs/flag-ledger.md) — 21 个开关的完整台账与证伪原因
+- [`docs/flag-ledger.md`](docs/flag-ledger.md) — 22 个开关的完整台账与证伪原因
 - [`docs/multi-gpu-and-interconnect.md`](docs/multi-gpu-and-interconnect.md) — 单卡/双卡/三卡/四卡 + NVLink 的建议矩阵
 - [`docs/how-we-measure.md`](docs/how-we-measure.md) — ABAB 协议与相位表读法（**先读这个再看数字**）
 
