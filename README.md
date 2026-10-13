@@ -1,20 +1,13 @@
 # Strata on Tesla V100（sm_70）— 实测调优笔记与补丁
 
-在**双 Tesla V100-32GB（Volta, sm_70）**上跑 [Strata](https://github.com/Niko1221/Strata)
-推理引擎 + **Qwen3.8-Flash-Next IQ3_S**（48 层 / 512 专家 MoE）的完整实测记录。
+**双 Tesla V100-32GB（Volta, sm_70，无 NVLink）跑 [Strata](https://github.com/Niko1221/Strata)
++ Qwen3.8-Flash-Next IQ3_S 的全部实测数字、补丁和翻车记录。**
 
-这个仓库回答三个问题，每条都有可复算的数字：
-
-1. **上游有个多卡 bug 会让第二张卡降速跑** —— 已修，补丁在 `patches/`，可直接提 PR。
-2. **IQ3_S 在 Volta 上跑 WMMA tensor-core 反而慢 20%** —— 社区首个实测数据点，附机制解释。
-3. **19 个调优开关哪些真有用、哪些有害** —— 采纳 9、证伪 10，每条带失败原因。
-
----
-
-## 我们这台机器现在能跑多快
+## How fast is it? 我们这台机器现在能跑多快
 
 2026-10-13 实测**生产服务**（不是离线跑分），双 V100-32GB / PCIe 无 NVLink /
-Qwen3.8-Flash-Next IQ3_S。每档 3 轮取中位数，**每轮换不同 prompt** 防止命中前缀缓存：
+Qwen3.8-Flash-Next IQ3_S（48 层 / 512 专家 MoE）。每档 3 轮取中位数，
+**每轮换不同 prompt** 防止命中前缀缓存：
 
 | 场景 | Prompt | 输出 | **prefill** | **decode** | MTP 接受率 |
 |---|---|---|---|---|---|
@@ -22,11 +15,35 @@ Qwen3.8-Flash-Next IQ3_S。每档 3 轮取中位数，**每轮换不同 prompt**
 | 长回答 | 2 364 | 386–597 | **997.6 tok/s** | 95.7 tok/s | 0.91 |
 | 长提示词 | 14 876 | 64 | **1 704 tok/s** | 92.4 tok/s | 0.93 |
 | 超长上下文 | 36 864 | 64 | **1 817 tok/s** | 85.4 tok/s | 0.73 |
+| **同一提示词重发（命中前缀缓存）** | 14 876 | 64 | — | **37 ms 全程** | — |
+
+拿这五个数字跟社区比：
+
+| 对照 | decode tok/s |
+|---|---|
+| **我们 2× V100-32GB（2017 年卡，无 NVLink）** | **110.8** |
+| 社区 1× RTX 4090 24GB（同模型同量化，280W 墙） | **110.8 —— 打平** |
+| 社区 2× RTX 3090（262K 上下文） | ~120 |
+| 社区 1× RTX 5090 96GB | 180–221 |
+| 社区 4× V100 **带 NVLink**（IBM AC922 fork） | ~113 |
+| 社区 1× V100 32GB（同模型，Strata 官方无调优） | 50–55 |
+| 社区天花板：单张 V100 + 自写引擎 + 软件 NVFP4（**项目 NInfer，非本仓库**） | 201–219 † |
+
+† 那个 219 tok/s 属于另一个项目 **NInfer**（自写 C++/CUDA 引擎、稠密 Qwen3.8-27B、
+软件模拟 NVFP4、单卡 V100），条件是 172-token 逐字复现提示词的 context-reproduction
+fast path。我们不冒领别人的数字，列在这里只作天花板参照 —— 出处见
+[`docs/community-comparison.md`](docs/community-comparison.md)。
+
+**显存更大的卡会更快。** 我们这套数字的前提是 2×32GB 走 PCIe 层切分；
+`--layer-split 25` + 专家 100% 常驻已经把这台机器榨到接近上限，换成 NVLink 机器或
+更大显存的卡，prefill 还能再上一个台阶（社区 4–6 卡 V100 带 NVLink 报到
+**7 357 tok/s prompt**，是我们 1 817 的 4 倍）。但**在没有 NVLink 的机器上，
+下面这套配置就是接近最优的解** —— 19 个开关我们全试过，采纳 9 个、证伪 10 个。
 
 三个从数字里直接读出来的结论：
 
 - **prefill 比 decode 快约 16 倍**（1 817 vs 110.8）。prefill 吃算力、decode 吃带宽，
-  这个不对称决定了下面所有取舍。
+  这个不对称决定了下面所有取舍 —— 也是为什么我们的算子优化在 decode 上全部归零。
 - **36K 上下文时 MTP 接受率掉到 0.73**（短上下文 0.88–0.93）。上下文越长猜得越不准，
   收益被拒稿吃掉 —— 所以我们生产上把 MTP 窗口和 `reasoning_budget` 都设了上限。
 - **前缀缓存的收益比任何 flag 调优大两个数量级**：重发同一段 12.9K 提示词，
@@ -34,33 +51,28 @@ Qwen3.8-Flash-Next IQ3_S。每档 3 轮取中位数，**每轮换不同 prompt**
   我们折腾的所有内核/开关加起来都远不到这个量级。
 
 完整环境配置、每一轮原始数据、以及**五个踩过的测量坑**（含"缓存前缀会悄悄毁掉你的跑分"
-这个真实翻车），见 [`docs/benchmarks.md`](docs/benchmarks.md)。
-
-### 这在社区里算什么水平？
-
-**我们双 V100 的 110.8 tok/s decode，与社区独立第三方仓库实测的单张 RTX 4090
-（24GB，280W 功耗墙）完全相同** —— 2022 年的消费级旗舰卡，被 2017 年的数据中心卡打平。
-同期对照：
-
-| 配置 | decode tok/s |
-|---|---|
-| **我们 2× V100-32GB** | **110.8** |
-| 社区 1× RTX 4090 24GB（同模型同量化） | **110.8** |
-| 社区 2× RTX 3090（262K 上下文） | ~120 |
-| 社区 1× RTX 5090 96GB | 180–221 |
-| 社区 1× V100 32GB（同模型，Strata） | 50–55 |
-| 社区 4× V100 **带 NVLink**（IBM AC922 fork） | ~113 |
-
-我们不是第一：5090 和多卡 NVLink 机器仍然更快。**短板在 prefill —— 我们 1 704，
-带 NVLink 的 4–6 卡 V100 报到 7 357，差 4 倍**，原因是这台机器两张卡走 PCIe 无 NVLink，
-层切分时每个 token 都要跨总线。这是硬件约束，调优解决不了。
-
-每个数字都带出处链接，另附**三个最容易造成误读的对比陷阱**（同模型≠同工作量、
-上下文深度会吃掉大部分差距、MTP 接受率强依赖任务类型），见
+这个真实翻车），见 [`docs/benchmarks.md`](docs/benchmarks.md)；
+每个社区数字都带出处链接，附**三个最容易造成误读的对比陷阱**，见
 [`docs/community-comparison.md`](docs/community-comparison.md)。
+
+**我们的短板也写在这**：prefill 1 704 vs 带 NVLink 多卡 V100 的 7 357，差 4 倍。
+原因是这台机器两张卡走 PCIe 无 NVLink，层切分时每个 token 都要跨总线。
+**这是硬件约束，调优解决不了**，别按我们的 prefill 数字去推断 NVLink 机器。
 
 > ⚠️ 这是**我们这台机器的最优点，不是通用最优解**。无 NVLink 是这套数字的前提之一；
 > 有 NVLink 或换模型/换量化格式，结论都要重测。
+
+## 三个最有价值的发现（都有补丁 / 有数据）
+
+1. **上游多卡 bug：layer-split 下 WMMA 必失败**，第二个 prompt 请求就报错
+   `prefill: the WMMA expert tiles could not launch`。根因是 `cudaFuncSetAttribute`
+   按 GPU 设备生效，上游却用一个 `static bool` 记住"设过了"—— **上游基准机是单卡，
+   所以这个 bug 从没暴露过**。补丁约 10 行，在 [`patches/`](patches/)，
+   **可直接提 PR 给上游**。
+2. **IQ3_S 在 Volta 上走 WMMA tensor core 反而慢 20%** —— 社区首个实测数据点
+   （上游 issue 区 313 条 volta/v100 讨论里没人测过这个组合），附机制解释。
+3. **`STRATA_PF_WMMA=2` 混合模式 prompt +4.1~4.3%**（1081 → 1127 tok/s，
+   三轮 ABAB 交替实测）—— gate/up 留 MMQ、只把 down 送上瓦片。
 
 ---
 
@@ -84,7 +96,7 @@ Qwen3.8-Flash-Next IQ3_S。每档 3 轮取中位数，**每轮换不同 prompt**
 
 ---
 
-## 三个最有价值的发现
+## 三个发现的细节展开
 
 ### 1. 多卡 layer-split 下 WMMA 必失败（上游 bug，已修）
 

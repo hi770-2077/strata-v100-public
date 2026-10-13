@@ -127,6 +127,33 @@ numbers diverge by much more. That is the same compute-bound vs
 bandwidth-bound split we measured — MoE decode is memory-bound, so card
 generation matters far less than bandwidth.
 
+## The fastest V100 decode number we found — and why it is not ours
+
+People searching "V100 decode tok/s" will eventually hit **201–219 tok/s**. That
+number belongs to a different project, **NInfer** (`geowatts/gw`), and it is
+honest to say so plainly rather than quietly leave it out or, worse, quietly
+bank it:
+
+| | This repository | NInfer |
+|---|---|---|
+| Engine | Strata (upstream, patched) | Own C++/CUDA inference engine |
+| Model | Qwen3.8-Flash-Next **MoE**, 48 layers / 512 experts | Qwen3.8 **27B dense** |
+| Quantization | IQ3_S (GGUF) | Software-emulated **NVFP4** |
+| Cards | 2× V100-32GB, PCIe, no NVLink | **1×** V100 |
+| Headline decode | **110.8 tok/s** | **201–219 tok/s** |
+
+Every one of those five variables differs. The 201.0 tok/s figure is measured on
+a 172-token **verbatim-copy prompt**, which that project documents as a
+"context-reproduction fast path" — a different workload from real generation, and
+the reason it does not transfer to our numbers. Their maintainer log also shows
+169–190 tok/s on longer, more realistic prompts.
+
+We list it as the **ceiling for this hardware class**: it says a single V100 has
+roughly twice our per-card headroom left on the table, reachable only by leaving
+GGUF and Strata behind. It is a target, not a score. Anyone comparing our 110.8
+against 219 without reading this section would be comparing different engines,
+different models, different numeric formats and different workloads.
+
 ## Where we fall short
 
 **Prefill, by a wide margin, and it is structural.** A Strata fork on an IBM
