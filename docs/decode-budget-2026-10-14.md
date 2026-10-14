@@ -111,3 +111,42 @@ speculative 窗 ≈ 6.0 ms 固定 + 3.45 ms/token。
    配比剧变但每 token 成本精确不变——**调草稿结构只换 fresh/speculative 配比，不换 blended 成本**。
 ⇒ 想赢只有两条路：**砍 per-token 成本本身（窗口②内核，+3–6%）**，
    或**砍 fresh 窗固定开销/占比（调度层手术或模型级接受率，理论 +10–20%，均无便宜旋钮）**。
+
+### 6.3 调度层侦察结论（STRATA_PIPELINE_TRACE 逐窗时间线，零重建，双请求逐位一致）
+
+方法：`STRATA_PIPELINE_DEBUG=1 + STRATA_PIPELINE_TRACE=<file>`（循环每个事件带主机时间戳，L0/F0/L1/F1/V/CL/CD/CE/U），
+生产参数原样运行，106.7/106.8 tok/s 与基线逐位一致（埋点零开销）。注意 **seq 会复用**：doomed B 滚回后
+fresh 窗重用同一 seq（L0 双事件），分类须按「verdict 前最后一次 F0 的 spec 标志」。
+
+**管线设备账（每请求 32 窗 / 525 ms，trace 内部账与 NVML 请求期采样互证）**：
+
+| 设备 | 负载 | 忙碌率 | NVML 印证 |
+|---|---|---|---|
+| GPU0（层 0-24） | 44 次 stage-0 验证（32 A + 12 doomed B） | **83%**（424 ms） | 83–86% |
+| GPU1（层 25-47 + MTP drafter） | 32 次 stage-1 + 31 条 chain | **81%**（stage1 64% + chain 17%） | 78–84% |
+
+- 每窗成本：**s0 ≈ 6.4 + 1.7×T ms**（GPU0）、**s1 ≈ 6.5 + 1.6×T ms**（GPU1）；chain 1.5–5.1 ms（fresh 均值 2.3 / spec 3.3）
+- chain 归属 GPU1 由双证据确认：trace 账（若在 GPU0 则超载 101%）+ `mtp.cpp:246`「drafter lives on the last stage's device」
+
+**两类周期的结构地板（实测已贴地）**：
+- **fresh 周期 20.35 ms** = chain 首输出等待 0.7 + s0_A（8.0–12.6）+ s1_A（8.1–12.3）+ 交接 0.3；
+  T=1 窗实测 17.2 vs 地板 17.15——**误差 0.2 ms**。GPU1 空闲 9–11.5 ms/周期是**结构性**的：
+  fresh 周期里 GPU1 唯一可干的活（A 的 stage 1）依赖 A 的 stage 0 输出，chain 已藏在这段空闲里
+- **spec 周期 12.88 ms** = max(GPU1: s1_A + 0.85×chain 互损 ≈ 12.1，GPU0: chain 等待 + s0_B)；
+  chain 与 stage 1 在 GPU1 并发互损（T=2 窗 s1 从干净 9.64 被拉到 12.20）；距地板 ~0.8 ms
+- 主机侧全 0.00（plan/actq/jobs/CPU/wait），undo 0.15–0.45 ms——主机不是瓶颈
+
+**手术面逐条定量排除**：
+1. **chain 迁移到 GPU0**：GPU0 将 83%+17% > 100% 超载，且 fresh 周期失去 chain 藏身处——净负
+2. **chain 降 stream priority**（保 stage 1 干净）：chain 拉长 → GPU0 的 B 启动等待同比拉长——净负
+   （当前 0.85 互损系数下 GPU1 12.1 / GPU0 ~12.4 本是均衡态）
+3. **θ 门限调整**（默认 0.20）：p_on 校准表非单调（0.4:4/6、0.5:1/4、0.6:4/7、0.7:1/3、0.8:2/2、0.9:5/5），
+   0.4–0.7 区间估计量几乎无信息；抬 θ 把 on-path 的 B 变 fresh（每次 +7.5 ms）——净负
+4. **B 的 T 封顶**（治机制 B：T_B=4 时 s0_B 尾巴拖到下一周期，GPU1 空等 ~5 ms × 4 窗 ≈ 20 ms）：
+   与每 token 成本不变式冲突（低 T 窗固定开销占比升高），预期洗平
+5. **undo / 主机侧**：合计 < 10 ms，无空间
+
+**结论：调度层无可 profitable 的手术——系统在结构地板 ±5% 内运行，双设备负载 83/81% 已均衡，
+fresh 周期 GPU1 空闲结构性无活可填。** 理论完美重叠地板 max(424, 412) = 424 ms vs 实际 508（1.20×），
+差额绝大部分是 fresh 周期的串行结构。剩余大池子归属：**内核（s0+s1 占 spec 周期 79–84%）→ 窗口②；
+接受率（15/32 fresh；完美接受率理论 +27%）→ 窗口④**。
