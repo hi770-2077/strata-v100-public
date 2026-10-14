@@ -1,4 +1,4 @@
-# 26 个调优开关的完整台账
+# 28 个调优开关的完整台账
 
 > 硬件：2× Tesla V100-PCIE-32GB（GV100GL, sm_70），驱动 580.178.04，CUDA 12.8
 > 模型：Qwen3.8-Flash-Next GSQ-RCO IQ3_S（48 层 / 512 专家 top-10 / GDN+QSA 混合 / PLE n-gram 层）
@@ -33,11 +33,11 @@
 
 ---
 
-## 证伪（13 项，附失败原因）
+## 证伪（15 项，附失败原因）
 
 | 开关 | 实测结果 | 失败原因 |
 |---|---|---|
-| `STRATA_PF_WMMA=1`（全 WMMA） | 净打平（~1084 vs 1081） | **IQ3_S gate/up 慢 20%**（Volta 上 MMQ 走 int8 `mma.sync`，吞吐 2× FP16，且q8_1 激活 1 字节/元素）；IQ4_NL down 快 20% → 取 down-only 混合（mode 2） |
+| `STRATA_PF_WMMA=1`（全 WMMA） | 净打平（~1084 vs 1081） | **IQ3_S gate/up 慢 20%**；IQ4_NL down 快 20% → 取 down-only 混合（mode 2）。⚠️ 机制注释 2026-10-14 修正：~~「Volta 上 MMQ 走 int8 mma.sync」有误~~——**V100 没有 int8 mma.sync 硬件**（sm_75+ 才有），MMQ 路径是 CUDA core 上的 dp4a；全 WMMA 要把权重反量化成 f16 再上 tensor core，IQ3_S 的反量化（iq3s_grid 双查表 + 符号异或 + 每 4 值 scale）远比 IQ4_NL（单查表 + 乘 scale）贵，加上 f16 激活 2 字节/元素，转换开销吃掉了 f16 mma 的吞吐优势——IQ4_NL down 反量化便宜所以能 +20%。**数字是实测，机制以上述修正为准** |
 | `--expert-cache-device1/2` | **引擎拒启** | 与 layer-split 架构**互斥**：要求一张不跑 stage 的空卡，4 卡以上才玩得起 |
 | `STRATA_STAGE_PIN=1` | **解码损坏** | IQ3_S 4096 prompt 后输出崩坏。严禁 |
 | `--short-read 0` | 5 个 fresh token 读取 129→274 ms | 小批次解码窗口下更快（判别法见 `scripts/bench_shortread.py`） |
@@ -46,6 +46,8 @@
 | `--spec 1` | **引擎拒启** | native IQ pack 启动硬检查：`it needs --native SHARD1, --spec T (T >= 2) and --prefill CHUNK`——「关掉投机看地板」在这个 setup 上不存在，spec 下限就是 2 |
 | `STRATA_KV_ROT=1` | **无差异**（噪声内）：日常 decode 103.70→103.83（+0.1%），bench 106.9→106.7，接受率 85.8%→86.0%；**固定 prompt temp 0 输出 4 轮逐字节一致**（canary md5 全同，顺带证明引擎 temp 0 确定性） | k8v4 主路径**结构性排除**旋转（layer.cpp:704：`st.kv_rot = kv_q4 || (kv_int8 && g_kv_int8_rot)`，K8V4 只旋 V）；唯一理论通道是 MTP drafter 的 INT8 ring（mtp.cpp:336-337 创建 drafter 状态时把 globals 切纯 INT8），但 drafter 草稿本来就要过 target 模型验证，这点扰动翻不动任何接受决策。上游注释本就按包分化（NVFP4 首 token KL 0.0066→0.0051 改善，IQ2_XS 0.0022→0.0054 恶化）——IQ3_S/k8v4 属「无感」档。⚠️ **附带代价：`c.kv_rot` 进 SessionConfig 指纹（generate.cpp:7787），开启即使无增益也会废掉会话缓存**。NInfer 拆解见 [`ninfer-teardown.md`](ninfer-teardown.md) §5 |
 | `--prefill auto:16384` | 仍解析为 8192 | 专家缓存 100% 占满，借不出缓冲区 |
+| mma IQ3_S 内核移植（旧候选①） | **不移植**：sm_70 上无路可走 | 三行代码事实推翻了原候选的前提：① llama.cpp 的 IQ3_S mma 路径由 `TURING_MMA_AVAILABLE` 门控（common.cuh:288，sm_75+ 才有 int8 `mma.sync` m16n8k32），**Volta 根本没有 int8 mma 硬件**；② 上游自己在 sm_70 上给 IQ3_S 的就是 dp4a 路径（mmq.cuh:418 `MMQ_DP4A_TXS_Q8_0` + mmq-load-tiles.cuh:1359 的 `#else` 分支）——「移植」的对象在 V100 上不存在；③ Volta 只有 f16 mma 且只有 m8n8k4 一种形状（原始 HMMA，m16n8k16 要 sm_80+；mmf.cuh 的 Volta 分支 tile 32×8/8×4 正是以它搭建，服务 FP16 非量化路径），「IQ3_S 反量化成 f16 再走 mma」属于从零写内核而非移植，且 iq_multi_parity --bench 实测边际列算力只占 dp4a 峰值 ~10%（6.4 TOPS / ~31 T MAC/s）——没有算力瓶颈可解，反量化查表开销只会吃掉理论增益。数据见下条与 [`iq_mmvq_bench.md`](iq_mmvq_bench.md) |
+| Volta MTP 验证内核（NInfer 机制 #4） | **无候选价值** | verify 窗口 T≤8 个 token 与 decode 共享 dp4a 内核，且已有多列权重复用路径。实测 IQ3_S 8192×2560：nc=1 27.4 µs（权重 9.01 MB → 329 GB/s = 37% of 900 GB/s），nc=8 73.5 µs，**边际 6.6 µs/列 vs 旧路径 20.8 µs/列（2.34×）**；生产 spec=4 的 T=4 验证窗已享受 46.5 vs 89.5 µs（1.92×）。ridge point ~35 MACs/byte vs 单列强度 2.3、8 列复用 18.6 → 深内存瓶颈区，写算力向内核（Volta 无 int8 mma，f16 mma 也帮不上权重流式部分）零收益。`STRATA_SM70_TABLE` 三件套（expert mode 8 / gr_fast / mmvq_il Volta rows 表）已覆盖验证路径仅有的 Volta 专属受益点且生产已开；il 表只放行 type 23/12/13/14/11，不覆盖 IQ3_S |
 | `--mtp-q4`（非 `all` 取值） | **−34%** | 与 `--mtp-q4 all` 是两回事，别混 |
 | `--coupled-draft` | −24%~−43% | 旧版扫描证伪 |
 | `--expert-cache-per-layer` | 有害 | 旧版扫描证伪 |
@@ -57,16 +59,20 @@
 
 ## 待验证的下一个候选
 
-**把 llama.cpp 的 mma IQ3_S 内核路径移植进 Strata。**
+**iq_mmvq 访存优化：把权重流式带宽利用率从 37% 往上做。**
 
-背景：llama.cpp（Unsloth fork b10995）已完整支持本架构 `qwen4exp`（含 PLE/indexer/GDN），
-但它的 IQ3_S 在 Volta 上走 mma tensor-core，Strata 走的是转录自 llama.cpp **旧版 vec dot** 的
-CUDA-core 路径。decode 阶段已是显存带宽瓶颈（专家 100% 常驻，每步要读整个模型），
-所以这条收益主要在 **prefill / 多token 窗口**（那里是算力受限）。
+背景（2026-10-14 `iq_multi_parity --bench` 实测意外发现，数据见 [`iq_mmvq_bench.md`](iq_mmvq_bench.md)）：
+IQ3_S 8192×2560（= 9.01 MB 权重）单列 27.4 µs → **329 GB/s，只有 V100 HBM2 900 GB/s 的 37%**。
+dp4a 算力只占 2.4%（21M MACs @ 峰值 0.67 µs / 实测 27.4 µs）——内核既没吃满带宽也没吃满算力，
+是**内存并行度/占用率瓶颈**，典型可优化形态（每块仅 4 行 4.4 KB、每线程 ~34 B 加载）。
+decode 每步要流式读全模型权重，该内核直接决定 decode 地板；verify 边际列同样受益。
+同族对照：IQ3_XXS 351 / IQ2_XXS 275 / IQ2_S 210 / IQ1_M 180 GB/s——IQ3_S 已是族内最高，但离 70%+ 仍有距离。
 
-优先级：中。要改 Strata 内核，且只对prefill 有效。
+方向：提高 in-flight 加载数（展开/向量化 LDG、占用率调优），不动算法语义（parity 已有多列新旧内核位级一致的基础）。
+上限诚实评估：纯流式内核 70–80% peak 可达，本内核带反量化 + dp4a，现实目标 **1.3–1.5×**；
+且全局 decode 还含 attention / MoE 路由 / 专家计算，内核快 1.3× ≠ decode 快 1.3×——先做全局 GPU 时间分解再定优先级。
 
-分析见 [`llama-cpp-mining-notes.md`](llama-cpp-mining-notes.md)。
+优先级：低-中。原候选①（mma IQ3_S 移植）已证伪关闭，见上表。
 
 ---
 
@@ -102,7 +108,7 @@ reasoning_budget_tokens 16384
 
 **这张表解释了本台账的形状**：prefill 是 decode 的 16 倍，所以
 「让乘法更快」的改动（WMMA、算子优化）能在 prefill 上拿到几个百分点，
-却在带宽瓶颈的 decode 上全部归零 —— 这就是下面 13 条证伪项里大多数的共同原因。
+却在带宽瓶颈的 decode 上全部归零 —— 这就是下面 15 条证伪项里大多数的共同原因。
 
 > 注：这是我们这台机器的最优点，**不是通用最优解**。你的硬件拓扑、模型、上下文长度不同，
 > 数字会不一样。`--layer-split` 和 `--mtp-q4` 这类与显存布局强相关的尤其要自己重扫。

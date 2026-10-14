@@ -79,7 +79,7 @@ NInfer 用 37,758 token 的非重复语料测了自己的 varied-context 曲线�
 | 1 | 草稿/验证宽度解耦 | `verify_k` 与 `proposal_k` 分开配，proposal extent 按「剩余输出预算 / 剩余上下文 / 配置窗」三者最小值自适应收缩 | Strata 早有对应物：`--spec` 只定 MTP 草稿数，验证宽度运行态扩到 `min(草稿数 + lookup_chain, 8)`（kVerifyMaxT）；`spec/draft_policy.hpp` 注释原话 "takes one only where it pays" | **已内置** |
 | 2 | 窄窗赢 | K=1 → 219.0，K=7 → 181：接受率饱和后，验证成本主导 | 已测 spec 2 vs 4（2026-10-14 ABAB）：**输 2.0%**，接受率反升 4.9pp 但 decode 降 | **已测：不移植**（见 §5） |
 | 3 | 一次 CUDA Graph launch | 整个投机循环一张图 | Strata 已有（session.cpp：每层两个 graph 在 router 处切开） | 打平，划掉 |
-| 4 | Volta 专属投机验证内核 | `small_t_i8_volta` / `small_t_bf16_volta` | 我们的 `STRATA_SM70_TABLE=1` 只覆盖专家 GEMM 三件套；MTP 验证路径是否有 sm_70 专属版**待查** | 待评估（中优先级） |
+| 4 | Volta 专属投机验证内核 | `small_t_i8_volta` / `small_t_bf16_volta` | 已测（2026-10-14 晚）：verify 窗口 T≤8 与 decode 共享 dp4a 多列内核，实测边际列仅 6.6 µs/列、算力只占 dp4a 峰值 ~10%；Volta 无 int8 mma 硬件；SM70_TABLE 三件套已覆盖验证路径仅有的 Volta 专属受益点且生产已开 | **已测：无候选价值**（见 §5） |
 | 5 | KV int8 + Hadamard | D256 Hadamard 变换（QuaRot 家族）压 INT8 KV 离群值，默认集成 | 已测 `STRATA_KV_ROT=1`（2026-10-14 ABAB 四轮）：**无差异**——k8v4 主路径结构性排除（layer.cpp:704），仅 MTP drafter 的 INT8 ring 受影响且翻不动接受决策 | **已测：无增益**（见 §5） |
 | 6 | N-gram 草稿源 | context-lookup（上文 §2.3） | Strata 的 **suffix drafter 默认开启**：提示词后缀 N-gram 作草稿，官方 bench 记录 code 场景 **+6~11%**、普通散文持平 | **方向已采纳**，NInfer 版是其无损强化 |
 
@@ -97,7 +97,7 @@ NInfer 用 37,758 token 的非重复语料测了自己的 varied-context 曲线�
 
 ---
 
-## 5. 我们在测什么（两项均已测：窄窗输 2.0%，KV 旋转无差异）
+## 5. 我们在测什么（三项均已测：窄窗输 2.0%，KV 旋转无差异，Volta 验证内核无候选价值）
 
 机制 #2 直接变成了本月的 A/B：`--spec 4`（MTP 4 drafts + 验证宽度 8）
 vs `--spec 2`（MTP 2 drafts + 验证宽度 6），ABAB 交替、日常口径
@@ -128,8 +128,20 @@ k8v4 主路径结构性排除旋转（layer.cpp:704），唯一理论通道是 M
 （generate.cpp:7787），开启即使无增益也废掉会话缓存。详情见
 [`flag-ledger.md`](flag-ledger.md) 证伪表。
 
-**剩下的队列**：机制 #4（Volta MTP 验证内核）待查代码；prefill 侧 mma IQ3_S
-内核移植，见 [`llama-cpp-mining-notes.md`](llama-cpp-mining-notes.md)。
+**机制 #4 也已测完（2026-10-14 晚）：无候选价值。** 代码走查 + `iq_multi_parity --bench`
+实测（数据见 [`iq_mmvq_bench.md`](iq_mmvq_bench.md)）：verify 对窗口 T 个 token 跑完整
+目标模型前向，与 decode 共享同一批 dp4a 内核，且「权重解码一次」的多列路径已覆盖 T=2..8——
+IQ3_S 8192×2560 单列 27.4 µs（权重 9.01 MB → 329 GB/s = 37% of 900 GB/s），8 列 73.5 µs，
+**边际 6.6 µs/列 vs 旧逐列路径 20.8 µs/列**；生产 spec=4 的 T=4 验证窗已享受
+46.5 vs 89.5 µs（1.92×）。ridge point ~35 MACs/byte vs 单列强度 2.3、8 列复用 18.6
+→ 深内存瓶颈区，写算力向内核（无论 mma 还是别的）零收益；且 Volta 无 int8 `mma.sync`
+（sm_75+ 才有），llama.cpp 自己的 IQ3_S mma 路径同样是 Turing 门控——「移植」的对象
+在 V100 上不存在。
+
+**剩下的队列**：iq_mmvq 访存优化（带宽利用率 37% → 现实目标 1.3–1.5×，需先做全局
+GPU 时间分解再定优先级），见 [`flag-ledger.md`](flag-ledger.md) 待验证候选区。
+旧候选「mma IQ3_S 移植」已证伪关闭（Volta 无 int8 mma 硬件，上游 IQ3_S mma 路径
+Turing+ 门控；f16 mma 路线属从零写内核且无算力瓶颈可解）。
 
 ---
 

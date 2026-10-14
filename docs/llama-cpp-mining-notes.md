@@ -79,7 +79,7 @@ PR #1401《V100 (sm_70): prompt experts on FP16 tensor cores (+10% prompt) and t
 
 1. **b11335（2026-10-02）PR #29753：sm_70 路由到 Turing MMVQ nwarps 表**——Volta 没有自己的 MMVQ 参数表，掉进 GENERIC 兜底（K-quant batch-1 解码 nwarps=4），而 sm_70 与 Turing 同 tuning（nwarps=2）。单张 V100 32GB PCIe + Qwen3.8-27B Q4_K_M 实测 **+3.17%**（6 个 ABBA block 全正，perplexity 逐位相同），源自 V100 专用 fork **anyei/llamacpp-v100** 的 `MMVQ_PARAMETERS_VOLTA` 表。→ Strata 侧的对应物就是我们已在跑的 per-arch IL rows 表（`STRATA_SM70_TABLE`）。**同一个「老卡需要自己的 launch 配置」结论，两边互相印证。**
 2. **issue #20605：PP graph reuse 关闭导致 V100 解码 -16%**（2× V100-SXM2 NVLink，Qwen3.5-35B-A3B MoE，91.1→83.2 tok/s）——不用 CUDA graph 每步重建图，CPU 开销吃掉 16%。→ **Strata 全程 CUDA graph（zero-doorbell），这类问题我们不存在**，再次验证引擎选型。
-3. **硬件事实**：Volta tensor core 只有 FP16/FP32/INT8，**没有 INT4**（Turing 起才有）。所以 V100 上「INT4 走 tensor core」是软件模拟；可行的路就是 #1401 的「反量化进 FP16 再上 WMMA」。
+3. **硬件事实**（2026-10-14 编译矩阵 + 生产二进制 SASS 双重修正）：Volta tensor core 只有 **FP16，且只有 m8n8k4 一种形状**（f16 输入 / f32 累加，即原始 HMMA；生产二进制 SASS 实测只有 `HMMA.884.F32.F32`，**零 IMMA**）。**INT8 mma.sync 在 sm_70 上完全不存在**——`m8n8k16.s8` 需 sm_75（Turing）、`m16n8k32.s8` 需 sm_80（Ampere）；INT4 从 Turing 起。所以 V100 上「INT8/INT4 走 tensor core」都是软件模拟；可行且已在生产的路就是 #1401 的「反量化进 FP16 再上 m8n8k4 WMMA」（`STRATA_PF_WMMA`，prompt +4.1~4.3%；K=4 的窄形状也是收益温和的硬件原因）。⚠️ 本条原写作「Volta tensor core 有 FP16/FP32/INT8」，2026-10-14 用 CUDA 12.8 ptxas 对 6 个 mma 变体 × sm_70/75/80 的编译矩阵证伪（见 [`iq_mmvq_bench.md`](iq_mmvq_bench.md) 附录）。
 
 ---
 
