@@ -97,17 +97,33 @@ NInfer 用 37,758 token 的非重复语料测了自己的 varied-context 曲线�
 
 ---
 
-## 5. 我们在测什么
+## 5. 我们在测什么（已测完：窄窗输 2.0%）
 
 机制 #2 直接变成了本月的 A/B：`--spec 4`（MTP 4 drafts + 验证宽度 8）
 vs `--spec 2`（MTP 2 drafts + 验证宽度 6），ABAB 交替、日常口径
 （`reasoning_effort=none` 流式测速 + 12 prompt 接受率探针，协议同
 [`how-we-measure.md`](how-we-measure.md)）。
-2026-10-14 上午跑完，结果与原始数据记入 [`flag-ledger.md`](flag-ledger.md)。
 
-如果窄窗赢，下一步把机制 #4 / #5 排上队（#5 有现成开关，成本最低）；
-如果打平，说明 Strata 的验证批已经足够便宜，精力转回 prefill 侧
-（mma IQ3_S 内核移植，见 [`llama-cpp-mining-notes.md`](llama-cpp-mining-notes.md)）。
+**实测结果（2026-10-14，日常口径，best-of-3 中值）：**
+
+| 配置 | decode 中位 | 接受率 | bench |
+|---|---:|---:|---:|
+| `--spec 4`（现生产） | 103.60 tok/s | 85.7% | 106.6 |
+| `--spec 2` | 101.50 tok/s | **90.6%** | 105.3 |
+
+判定：**窄窗证伪，−2.0%**（ABAB 各 2–3 轮，复现差 <0.2%，结论决定性）。
+接受率反升 4.9pp 是选择效应——草稿少了单条更易中，但每步吃进的 token 更少：
+lookup 免费草稿两个配置都有，砍掉的正是 MTP 的深预测。
+**教训：接受率是误导性指标，必须与 decode 同时报。**
+
+经济账：NInfer 的 K=1 赢在 99.2% 接受率的合成 fast-path 语料（§2.3），
+且它没有免费的 lookup 草稿分摊验证预算；我们的 suffix drafter 默认开启，
+简单预测已被免费覆盖，再砍 MTP 砍的是深预测——同一个机制，两种草稿结构，结论相反。
+
+**下一个候选：机制 #5（`STRATA_KV_ROT=1`，一个环境变量，半小时出数）**，
+按长上下文口径测（36.9K 档接受率 0.73 是动机，台账已排期）。
+机制 #4（Volta MTP 验证内核）待查代码。若 #5 也无增益，精力转 prefill 侧：
+mma IQ3_S 内核移植，见 [`llama-cpp-mining-notes.md`](llama-cpp-mining-notes.md)。
 
 ---
 

@@ -97,7 +97,7 @@ RTX 4090（24GB，280W 功耗墙）完全相同** —— 2022 年的消费级旗
 `--layer-split 25` + 专家 100% 常驻已经把这台机器榨到接近上限，换成 NVLink 机器或
 更大显存的卡，prefill 还能再上一个台阶（社区 4–6 卡 V100 带 NVLink 报到
 **7 357 tok/s prompt**，是我们 1 817 的 4 倍）。但**在没有 NVLink 的机器上，
-下面这套配置就是接近最优的解** —— 23 个开关我们全试过，采纳 13 个、证伪 10 个。
+下面这套配置就是接近最优的解** —— 23 个开关我们全试过，采纳 13 个、证伪 12 个。
 
 三个从数字里直接读出来的结论：
 
@@ -121,7 +121,7 @@ RTX 4090（24GB，280W 功耗墙）完全相同** —— 2022 年的消费级旗
 [`docs/calibers.md`](docs/calibers.md) —— 这是本项目最核心的一条测量纪律：
 一个不带口径的 decode 数字不是数字。
 
-**这些数字是怎么一个个试出来的**：22 个开关跑了 7 轮，其中 **6 次我们自己的初始假设
+**这些数字是怎么一个个试出来的**：23 个开关跑了 7 轮，其中 **6 次我们自己的初始假设
 被自己的数据杀死**（"降频 = 散热不够" → 锁 1250 反而更慢；"并发一定更快" → 4 并发比
 单请求慢；"内存大一定快" → decode 完全持平）。完整的自我推翻记录 + 六步可复用实验协议见
 [`docs/methodology.md`](docs/methodology.md) ——
@@ -241,9 +241,9 @@ IQ3_S 的 256 宽 superblock 反量化本身就不便宜，扔到 tensor core �
 
 ---
 
-## 22 个调优开关的完整台账
+## 23 个调优开关的完整台账
 
-**采纳 12 个**（生产在跑）：
+**采纳 13 个**（生产在跑）：
 
 | 开关 | 收益 | 说明 |
 |---|---|---|
@@ -257,18 +257,19 @@ IQ3_S 的 256 宽 superblock 反量化本身就不便宜，扔到 tensor core �
 | `--spec 4` / `--short-read 32` / `--prefill auto` | — | 甜点值；`prefill auto` 长 prompt 预填充 +99% |
 | `fit_max_tokens` + `reasoning_budget_tokens 16384` | 正确性护栏 | 思考硬上限 16K |
 
-**证伪 10 个**（含失败原因，省你重走）：
+**证伪 12 个**（含失败原因，省你重走）：
 
 | 开关 | 结果 | 为什么 |
 |---|---|---|
 | `STRATA_PF_WMMA=1` | 净打平 | IQ3_S gate/up 慢 20%，IQ4_NL down 快 20%，互相抵消 |
 | `--spec 8` | 长生成 −5.8% | 窗口专家流量增速超过收益 |
+| `--spec 2` | 日常 decode **−2.0%** | 接受率反升 4.9pp（选择效应）但每步吃进的 token 更少——**接受率单独看会误导，必须与 decode 同时报** |
 | `--short-read 0` | 5 token 读取 129→274 ms | 小批次解码窗口下更快 |
 | `--prefill auto:16384` | 仍解析为 8192 | 专家缓存 100% 占满，借不出缓冲区 |
 | `--expert-cache-device1/2` | 引擎拒启 | 与 layer-split 互斥（要求一张空卡，4 卡以上才玩得起） |
 | `STRATA_STAGE_PIN=1` | **解码损坏** | IQ3_S 4096 prompt 后输出崩坏，严禁 |
 
-完整台账（含另 4 个有害项）见 [`docs/flag-ledger.md`](docs/flag-ledger.md)。
+完整台账（含另 5 个有害项）见 [`docs/flag-ledger.md`](docs/flag-ledger.md)。
 
 ---
 
@@ -301,7 +302,7 @@ STRATA_KEY=xxx STRATA_URL=http://127.0.0.1:8080 python3 scripts/bench_prompt.py
 - [`docs/auditing-ai-tuning-plans.md`](docs/auditing-ai-tuning-plans.md) — **如何审计一份 AI 生成的调优方案**：14 个参数 11 个查无此物；「改专家数造四档模型」为什么物理不存在；相似匹配缓存为什么对 Agent 是系统性错误源
 - [`docs/client-call-patterns.md`](docs/client-call-patterns.md) — **调用姿势 4.19×**：同一个缓存机制，写法不对复用率就是 0%；另附 2,048 token checkpoint 门槛实测
 - [`docs/community-comparison.md`](docs/community-comparison.md) — **与社区数据的横向对比**：带出处链接、同一模型/引擎的对照表、四个容易误读的陷阱
-- [`docs/ninfer-teardown.md`](docs/ninfer-teardown.md) — **拆解别人的 219 tok/s**：三层解构（合成语料峰值 vs 真实文本曲线 vs lossless fast path）、六个机制逐条评级，其中两项已排进我们的测试队列
+- [`docs/ninfer-teardown.md`](docs/ninfer-teardown.md) — **拆解别人的 219 tok/s**：三层解构（合成语料峰值 vs 真实文本曲线 vs lossless fast path）、六个机制逐条评级——窄窗投机已实测证伪（−2.0%），KV Hadamard 旋转（`STRATA_KV_ROT`）排为下一个候选
 - [`docs/multigpu-wmma-bug.md`](docs/multigpu-wmma-bug.md) — 多卡 bug 的完整分析与补丁说明
 - [`docs/flag-ledger.md`](docs/flag-ledger.md) — 23 个开关的完整台账与证伪原因
 - [`docs/multi-gpu-and-interconnect.md`](docs/multi-gpu-and-interconnect.md) — 单卡/双卡/三卡/四卡 + NVLink 的建议矩阵
