@@ -1,8 +1,8 @@
 # decode 全局定量账与优化窗口排序（2026-10-14 实测）
 
-> 场景：Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ3_S（48 层 / 512 专家 top-10 / embed 2560 / GQA 24:2 /
-> GDN×36 + 全注意力×12 / indexer top-2048 / PLE 16 heads / 词表 248,320），生产配置见
-> `configs/sc117-256k-vision.json`（strata-1771 + PF_WMMA=2 + spec 4 + mtp-q4 all + layer-split 25）。
+> 场景：一台双 V100 机器上的 125B 级 MoE 生产模型（48 层 / 512 专家 top-10 / embed 2560 / GQA 24:2 /
+> GDN×36 + 全注意力×12 / indexer top-2048 / PLE 16 heads / 词表 248,320），引擎 strata-1771 +
+> PF_WMMA=2 + spec 4 + mtp-q4 all + layer-split 25。
 > 所有数字来自：引擎日志每请求计时行、`/metrics` 遥测（200 ms 粒度）、宿主机 `nvidia-smi` 双卡采样、
 > GGUF 张量清单解析。**实测与建模分开标注。**
 
@@ -42,7 +42,7 @@ Dense 读 9.1 ms（效率按 450 GB/s 估，未实测）+ 空闲间隙 3.4 ms + 
 
 | # | 窗口 | 收益 | 成本 | 依据 |
 |---|---|---|---|---|
-| 1 | **grouped 内核接线** | +10–15% | 低（跑 bench+接线） | bench 已证 IQ2_XS/IQ1_M grouped 新内核 1.8–2.1×；生产模型专家类型（IQ2_S×20/Q4_0×39/Q2_0×9）未被 grouped 对照覆盖，生产路径各类型实际调用的内核变体未逐一核对 |
+| 1 | ~~grouped 内核接线~~ | **0%（已关闭）** | — | 2026-10-14 三 bench 实测：生产已走新内核（引擎无代际开关）；VRAM 调用 new==v1（196 µs，391 GB/s=单卡峰值 46%）；新 iq_mmvq 代际只利好 IQ2_XS/IQ1_M（本 pack 不用）。详见《grouped 内核对照实测》 |
 | 2 | iq_mmvq 深度优化（37%→60–70%） | +10–15% | 高（CUDA 重写+parity+A/B） | 实测 329 GB/s；上游无更优可抄（sm_70 mma 路线已证伪） |
 | 3 | launch 间隙压缩（CUDA graph 等） | +8–12% | 中高（引擎调度） | 实测 util 78–90% |
 | 4 | 草稿接受率 73–94%→95% | +10–20% | 很高（重训 MTP 头） | flag 级已榨干：spec 8 证伪、spec-min-p 0.8 甜点、mtp-q4 all 已采纳 |
@@ -50,7 +50,8 @@ Dense 读 9.1 ms（效率按 450 GB/s 估，未实测）+ 空闲间隙 3.4 ms + 
 | 6 | prefill 残余 | <8% | 高 | 已 1500–1815 tok/s；PF_WMMA 仅 +4%；Volta dp4a 是上限路径 |
 | 7 | lookup chain | ≈0（本负载） | — | 0/562 windows：设计要求「上下文+MTP草稿尾部」精确历史匹配，聊天/创作负载不可命中；代码/重复性负载才可能受益，非 bug |
 
-叠加口径：1+2+3 互相独立（不同时间段），保守合计 **decode 1.25–1.45×**；再加模型级接受率上限 ~1.6×。
+叠加口径：2+3 互相独立（不同时间段），保守合计 **decode 1.18–1.27×**（① 已实测关闭为 0）；
+再加模型级接受率上限 ~1.6×。
 每项都是引擎级硬功夫——**flag 级甜头已经没有了**。
 
 ## 四、权衡型杠杆（非纯 win，记录备查）
@@ -61,9 +62,10 @@ Dense 读 9.1 ms（效率按 450 GB/s 估，未实测）+ 空闲间隙 3.4 ms + 
   量化它们可直接砍 dense 时间，但动质量核心，需专项评估
 - 量化不改变 MAC 数：prefill 是算力瓶颈，低比特量化对 prefill 无加速
 
-## 五、第一优先动作
+## 五、第一优先动作（2026-10-14 已执行，结论：窗口① 收益为零）
 
 用仓内现有 `native_grouped_parity` / `s2_expert_grouped_parity` / `iq_multi_parity --bench`
-对**生产模型的真实专家类型组合**（IQ2_S / Q4_0 / Q2_0 / IQ3_XXS / IQ3_S / IQ4_XS）跑 grouped vs old
-对照（真机经 SSH 跑，沙箱已无 /dev/nvidia*）。若 1.8–2.1× 红利延续到 IQ2_S/Q4_0，
-按流量加权约 40% 专家层的读取时间减半 → 全局 +10–15% decode，**零代码改动风险**。
+对**生产模型的真实专家类型组合**跑 grouped vs old 对照（真机 SSH 跑，`STRATA_SM70_TABLE=1`，
+native bench 需暂停生产服务 7 秒腾 3.7 GB arena）。完整数据与结论见
+《grouped 内核对照实测：窗口① 收益为零》：**生产已在跑新内核且主路径 new==v1，
+窗口① 关闭，第一优先移向窗口②（iq_mmvq 深度优化）**。
