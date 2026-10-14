@@ -1,4 +1,4 @@
-# 23 个调优开关的完整台账
+# 26 个调优开关的完整台账
 
 > 硬件：2× Tesla V100-PCIE-32GB（GV100GL, sm_70），驱动 580.178.04，CUDA 12.8
 > 模型：Qwen3.8-Flash-Next GSQ-RCO IQ3_S（48 层 / 512 专家 top-10 / GDN+QSA 混合 / PLE n-gram 层）
@@ -33,7 +33,7 @@
 
 ---
 
-## 证伪（12 项，附失败原因）
+## 证伪（13 项，附失败原因）
 
 | 开关 | 实测结果 | 失败原因 |
 |---|---|---|
@@ -44,6 +44,7 @@
 | `--spec 8` | 长生成 105.6→99.5 tok/s | 窗口专家流量增速超过投机解码收益 |
 | `--spec 2` | 日常 decode **−2.0%**（103.6→101.5 tok/s，ABAB 各 2–3 轮复现差 <0.2%）；bench −1.3%。**接受率反升 85.7%→90.6%** | 草稿少了单条更易中（选择效应），但每步吃进的 token 更少——lookup 免费草稿两个配置都有，砍掉的正是 MTP 的深预测。**接受率单独看会误导，必须与 decode 同时报**。NInfer 拆解见 [`ninfer-teardown.md`](ninfer-teardown.md) §5 |
 | `--spec 1` | **引擎拒启** | native IQ pack 启动硬检查：`it needs --native SHARD1, --spec T (T >= 2) and --prefill CHUNK`——「关掉投机看地板」在这个 setup 上不存在，spec 下限就是 2 |
+| `STRATA_KV_ROT=1` | **无差异**（噪声内）：日常 decode 103.70→103.83（+0.1%），bench 106.9→106.7，接受率 85.8%→86.0%；**固定 prompt temp 0 输出 4 轮逐字节一致**（canary md5 全同，顺带证明引擎 temp 0 确定性） | k8v4 主路径**结构性排除**旋转（layer.cpp:704：`st.kv_rot = kv_q4 || (kv_int8 && g_kv_int8_rot)`，K8V4 只旋 V）；唯一理论通道是 MTP drafter 的 INT8 ring（mtp.cpp:336-337 创建 drafter 状态时把 globals 切纯 INT8），但 drafter 草稿本来就要过 target 模型验证，这点扰动翻不动任何接受决策。上游注释本就按包分化（NVFP4 首 token KL 0.0066→0.0051 改善，IQ2_XS 0.0022→0.0054 恶化）——IQ3_S/k8v4 属「无感」档。⚠️ **附带代价：`c.kv_rot` 进 SessionConfig 指纹（generate.cpp:7787），开启即使无增益也会废掉会话缓存**。NInfer 拆解见 [`ninfer-teardown.md`](ninfer-teardown.md) §5 |
 | `--prefill auto:16384` | 仍解析为 8192 | 专家缓存 100% 占满，借不出缓冲区 |
 | `--mtp-q4`（非 `all` 取值） | **−34%** | 与 `--mtp-q4 all` 是两回事，别混 |
 | `--coupled-draft` | −24%~−43% | 旧版扫描证伪 |
@@ -56,19 +57,7 @@
 
 ## 待验证的下一个候选
 
-**① `STRATA_KV_ROT=1`：KV Hadamard 旋转（成本最低——只改一个环境变量）。**
-
-背景：NInfer 把 D256 Hadamard 变换（QuaRot 家族）作为默认路径集成，用来压 INT8 KV
-的离群值；Strata 有同款机制但是 opt-in（`generate.cpp` 2459-2461，INT8 K/V 过旋转），
-我们没开。我们的 `--kv k8v4` 里 K 侧就是 INT8——**离群 token 的量化误差可能正在
-吃掉长上下文的接受率**（36.9K 档已从 0.93 掉到 0.73，见 [`benchmarks.md`](benchmarks.md)）。
-⚠️ 会改数值、输出非 bitwise，必须先跑 parity 再测速；口径按**长上下文**设计
-（这条要的不是日常 decode 几个点，是长上下文接受率能否回抬）。
-
-成本：改一个环境变量，ABAB 半小时出数。**下一个就测它。**
-分析见 [`ninfer-teardown.md`](ninfer-teardown.md) 机制 #5。
-
-**② 把 llama.cpp 的 mma IQ3_S 内核路径移植进 Strata。**
+**把 llama.cpp 的 mma IQ3_S 内核路径移植进 Strata。**
 
 背景：llama.cpp（Unsloth fork b10995）已完整支持本架构 `qwen4exp`（含 PLE/indexer/GDN），
 但它的 IQ3_S 在 Volta 上走 mma tensor-core，Strata 走的是转录自 llama.cpp **旧版 vec dot** 的
@@ -113,7 +102,7 @@ reasoning_budget_tokens 16384
 
 **这张表解释了本台账的形状**：prefill 是 decode 的 16 倍，所以
 「让乘法更快」的改动（WMMA、算子优化）能在 prefill 上拿到几个百分点，
-却在带宽瓶颈的 decode 上全部归零 —— 这就是下面 12 条证伪项里大多数的共同原因。
+却在带宽瓶颈的 decode 上全部归零 —— 这就是下面 13 条证伪项里大多数的共同原因。
 
 > 注：这是我们这台机器的最优点，**不是通用最优解**。你的硬件拓扑、模型、上下文长度不同，
 > 数字会不一样。`--layer-split` 和 `--mtp-q4` 这类与显存布局强相关的尤其要自己重扫。

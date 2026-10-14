@@ -77,10 +77,10 @@ NInfer 用 37,758 token 的非重复语料测了自己的 varied-context 曲线�
 | # | 机制 | NInfer 的做法 | 我们的现状 | 评级 |
 |---|---|---|---|---|
 | 1 | 草稿/验证宽度解耦 | `verify_k` 与 `proposal_k` 分开配，proposal extent 按「剩余输出预算 / 剩余上下文 / 配置窗」三者最小值自适应收缩 | Strata 早有对应物：`--spec` 只定 MTP 草稿数，验证宽度运行态扩到 `min(草稿数 + lookup_chain, 8)`（kVerifyMaxT）；`spec/draft_policy.hpp` 注释原话 "takes one only where it pays" | **已内置** |
-| 2 | 窄窗赢 | K=1 → 219.0，K=7 → 181：接受率饱和后，验证成本主导 | 我们只测过 spec 4 与 8（8 被证伪），**K=2 档从未测过** | **正在测**（见 §5） |
+| 2 | 窄窗赢 | K=1 → 219.0，K=7 → 181：接受率饱和后，验证成本主导 | 已测 spec 2 vs 4（2026-10-14 ABAB）：**输 2.0%**，接受率反升 4.9pp 但 decode 降 | **已测：不移植**（见 §5） |
 | 3 | 一次 CUDA Graph launch | 整个投机循环一张图 | Strata 已有（session.cpp：每层两个 graph 在 router 处切开） | 打平，划掉 |
 | 4 | Volta 专属投机验证内核 | `small_t_i8_volta` / `small_t_bf16_volta` | 我们的 `STRATA_SM70_TABLE=1` 只覆盖专家 GEMM 三件套；MTP 验证路径是否有 sm_70 专属版**待查** | 待评估（中优先级） |
-| 5 | KV int8 + Hadamard | D256 Hadamard 变换（QuaRot 家族）压 INT8 KV 离群值，默认集成 | Strata 有对应开关 `STRATA_KV_ROT=1`（opt-in，我们未启用）；k8v4 的 V 已带旋转 | 待评估（**有现成开关，值得单测**） |
+| 5 | KV int8 + Hadamard | D256 Hadamard 变换（QuaRot 家族）压 INT8 KV 离群值，默认集成 | 已测 `STRATA_KV_ROT=1`（2026-10-14 ABAB 四轮）：**无差异**——k8v4 主路径结构性排除（layer.cpp:704），仅 MTP drafter 的 INT8 ring 受影响且翻不动接受决策 | **已测：无增益**（见 §5） |
 | 6 | N-gram 草稿源 | context-lookup（上文 §2.3） | Strata 的 **suffix drafter 默认开启**：提示词后缀 N-gram 作草稿，官方 bench 记录 code 场景 **+6~11%**、普通散文持平 | **方向已采纳**，NInfer 版是其无损强化 |
 
 关于 #6 的一个注脚：NInfer 的 context-lookup 与我们的 suffix drafter 是同一个思想
@@ -97,7 +97,7 @@ NInfer 用 37,758 token 的非重复语料测了自己的 varied-context 曲线�
 
 ---
 
-## 5. 我们在测什么（已测完：窄窗输 2.0%）
+## 5. 我们在测什么（两项均已测：窄窗输 2.0%，KV 旋转无差异）
 
 机制 #2 直接变成了本月的 A/B：`--spec 4`（MTP 4 drafts + 验证宽度 8）
 vs `--spec 2`（MTP 2 drafts + 验证宽度 6），ABAB 交替、日常口径
@@ -120,10 +120,16 @@ lookup 免费草稿两个配置都有，砍掉的正是 MTP 的深预测。
 且它没有免费的 lookup 草稿分摊验证预算；我们的 suffix drafter 默认开启，
 简单预测已被免费覆盖，再砍 MTP 砍的是深预测——同一个机制，两种草稿结构，结论相反。
 
-**下一个候选：机制 #5（`STRATA_KV_ROT=1`，一个环境变量，半小时出数）**，
-按长上下文口径测（36.9K 档接受率 0.73 是动机，台账已排期）。
-机制 #4（Volta MTP 验证内核）待查代码。若 #5 也无增益，精力转 prefill 侧：
-mma IQ3_S 内核移植，见 [`llama-cpp-mining-notes.md`](llama-cpp-mining-notes.md)。
+**机制 #5 也已测完（2026-10-14 下午）：无增益。** `STRATA_KV_ROT=1` ABAB 四轮
+（off on off on），日常 decode 103.70→103.83、接受率 85.8%→86.0%、bench 106.9→106.7，
+全部噪声内；固定 prompt temp 0 的 canary 输出四轮**逐字节一致**。代码层面原因：
+k8v4 主路径结构性排除旋转（layer.cpp:704），唯一理论通道是 MTP drafter 的 INT8 ring
+（mtp.cpp:336-337），扰动翻不动接受决策；且 `c.kv_rot` 进 SessionConfig 指纹
+（generate.cpp:7787），开启即使无增益也废掉会话缓存。详情见
+[`flag-ledger.md`](flag-ledger.md) 证伪表。
+
+**剩下的队列**：机制 #4（Volta MTP 验证内核）待查代码；prefill 侧 mma IQ3_S
+内核移植，见 [`llama-cpp-mining-notes.md`](llama-cpp-mining-notes.md)。
 
 ---
 
