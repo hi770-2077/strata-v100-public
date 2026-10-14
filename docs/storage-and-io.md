@@ -124,3 +124,29 @@ STRATA_DECODE_TIMING=1 STRATA_VERIFY_PROFILE=1 ./strata ...
 
 **On an NVMe machine, storage is not your bottleneck. Measure before you tune —
 and treat "your bottleneck is elsewhere" as a finding, not a non-answer.**
+
+---
+
+## 七、2026-10-14 复测：三层驻留现状（专家 100% VRAM / PLE mlock RAM / KV 98% VRAM）
+
+128 GB 内存 + v0.1.43 之后重测「谁常驻在哪」，全部只读测量（进程画像 + 引擎日志 + `/metrics`）：
+
+| 层 | 驻留位置 | 实测 |
+|---|---|---|
+| 专家权重 50.1 GB | **VRAM 100%** | CUDA0 12800 slots/23.08 GiB + CUDA1 11776 slots/23.75 GiB = profile 全部 24576 个 (layer,expert) 对；启动 8.9 s 预填（2773 MB/s）；请求级 `expert tiers: GPU 0 hits, RAM 0 blobs, files 0 blobs`、`0 major faults` |
+| PLE n-gram 表 28.8 GB | **主机 RAM（mlock）** | `--ple-io ram`，1.1 s 锁定，320001536 rows，00002 分片 26.82 GiB mmap 常驻 |
+| KV cache | **VRAM 98%** | `KV streaming: 97.98–98.24% of block reads hit VRAM`，仅 ~0.8 MiB/请求来自 RAM |
+| 会话快照（预算 24 GiB） | 主机 RAM | 8 会话全驻留 1.9 GB，evictions 22–23（有压力未冻结） |
+
+**每请求 PCIe 流量 = 噪声级**（−73~+19 MB，符号不稳；请求前后快照差分实测）⇒
+专家/PLE/KV 每前向都不走 PCIe。启动时 stager 经 PCIe 灌 46.8 GB 进 VRAM 是一次性成本。
+引擎自测 host→device 12.2 GB/s（据此把 pcie_frac 自动降为 0.33）。
+
+⇒ 第三节「`--ple-io ram` 在内存紧张的机器上是坑」的边界更清楚了：
+**125 GB 内存 + 100% page cache 的机器上 ram 模式无感**（PLE 表 1.1 s 锁完，
+之后读取全命中）。真正的坑仍然是「内存 < 模型 + PLE 表」的机器。
+
+**测量方法坑（重要）**：`/metrics` 的 `gpu_pcie_rx_mb` / `gpu_pcie_tx_mb` 是**累计值**——
+必须请求前后快照差分；对 200ms 采样点直接求和会算出虚高一个数量级的假流量
+（第一版脚本就这样报出了假的「并发 PCIe 1.2 GB」，差分重测后是噪声级。
+已补进 [`how-we-measure.md`](how-we-measure.md) 的坑清单）。

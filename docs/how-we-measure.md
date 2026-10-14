@@ -119,6 +119,11 @@ bash scripts/pfwmma_ab_time.sh 2    # 2 = down-only 模式
 - **5fresh token 批次 vs 单token**：`--short-read` 这类 flag 在不同 batch 下的结论会反转，
   所以要两种都测（`scripts/bench_shortread.py` 做判别）。
 - **单次跑就下结论**：GPU 状态会漂移，ABAB 是最低要求。
+- **累计值当采样值用**：`/metrics` 的 PCIe/磁盘计数器是**累计值**，必须请求前后快照差分；
+  对 200ms 采样点直接求和会得出虚高一个数量级的假流量（2026-10-14 实测踩到，
+  详见 [`storage-and-io.md`](storage-and-io.md) §7）。
+- **并发不等于并行**：引擎对并发请求是 FIFO 串行（实测聚合吞吐不随 N 增长），
+  所以「多开会话撑满 GPU」在这台机器上不成立，别把它当时优化手段记。
 
 ---
 

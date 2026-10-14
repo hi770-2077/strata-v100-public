@@ -208,11 +208,79 @@ than 8 concurrent all-pinned conversations will freeze it again. A real fix need
 the engine to allow evicting pinned entries under pressure, or the proxy to stop
 injecting prefixes — at the cost of the reuse gain. We chose the ceiling.
 
-## 7. What to take away
+## 8. Parallel requests buy nothing — the engine serializes them
+
+The obvious next question after section 1: *if one request is slow, can I run
+several at once?* Measured on this machine, 2026-10-14, same engine and config,
+N = 1/2/4/8 concurrent fresh requests (48 tokens each, unique salted prompts,
+ABAB order, engine-side accounting cross-checked):
+
+| N | Aggregate tok/s | vs single-request | Finish-time spread |
+|---|---:|---:|---:|
+| 1 | 52.5 / 54.2 | 1.00× | 0 s |
+| 2 | 52.4 / 50.7 | 0.97× | ~0.95 s |
+| 4 | 48.2 / 48.8 | 0.91× | ~2.9 s |
+| 8 | 51.4 / 53.6 | 0.98× | ~6.4 s |
+
+**Aggregate throughput is flat.** The engine serves requests one at a time —
+finish times land ~0.93 s apart, exactly the single-request service time, i.e.
+a FIFO queue with no overlap. Engine-side decode rate does not degrade under
+load (101–135 tok/s at every N; draft acceptance 81.6–91.6%), so requests do
+not slow each other down — they simply wait.
+
+What this means in practice:
+
+- **Concurrency is not a throughput strategy on this engine.** Eight parallel
+  requests finish in the time eight sequential ones would have, and the last
+  one waited 7.5 s for an answer that takes 0.9 s alone.
+- The 12–20% GPU idle seen in single-request sampling
+  (`decode-budget-2026-10-14.md` §window 3) **cannot be recovered by traffic** —
+  the gap is inside each request's service time, and there is no batching to
+  fill it with. That open question is now closed: **batching headroom = 0**
+  with this engine.
+- Both GPUs do stay busy during load (NVML 0.5 s sampling: GPU0 43–77%,
+  GPU1 46–63% over the run), so the machine is not the constraint — the
+  scheduler is.
+
+If you need more throughput today: reuse prefixes (section 1), generate longer
+per request, or run a second engine instance. The last one needs VRAM this
+machine does not have (97% resident — see `storage-and-io.md` §7).
+
+## 9. The short-prompt floor: ~460 ms is the engine's, ~8 ms is yours
+
+Every fresh short prompt pays a fixed cost before the first token. Measured
+2026-10-14 with `max_tokens=1` and a 76-token prompt, nine rounds:
+
+| Component | Time | Share |
+|---|---:|---:|
+| Client + HTTP + tokenizer + response transfer | **8–9 ms** | 1–2% |
+| Engine prompt path (fixed overhead) | **499–503 ms** | ~96% |
+| — of which theoretical prefill at 1 800 tok/s | 42 ms | |
+| — **fixed overhead** (snapshot / streamed ring / window warmup) | **456–461 ms** | |
+
+Three things worth knowing:
+
+- **The floor is engine-side and extremely stable** (456–461 ms across nine
+  rounds; 11.8× the theoretical prefill of the same prompt). Nothing you do in
+  the client removes it — the CPU side is already down to single-digit ms.
+- **The proxy hop costs ~1 ms** (8081 vs direct 8080: 889–891 ms vs 900–930 ms
+  wall). The prefix injection it buys is worth far more than it costs.
+- **Prefix reuse is the only bypass.** A repeated prefix turns the 460 ms into
+  ~37 ms (section 1: 14 876 → 5 prompt tokens). For agent workloads this is
+  the difference between a 0.5 s and a 5 s first token.
+
+So when a one-shot request feels slow: it is not your HTTP stack, and it is not
+the GPU. It is the prompt path, and the only lever you control is the shape of
+the request.
+
+## 10. What to take away
 
 Server-side flags gave us, in total, roughly +30% over a tuned baseline. The
 request-shape change gave **4.19×** on the workload it applies to, and the
-conversation-cache fix turned a frozen cache back into a working one.
+conversation-cache fix turned a frozen cache back into a working one. Two more
+client-side facts measured the same day: **parallel requests buy nothing** (the
+engine serializes them), and the **~460 ms short-prompt floor is engine-side** —
+the only lever you hold is request shape.
 
 **Tune the server first — then check how you are calling it. The last multiplier
 is usually in the client.**
