@@ -1,4 +1,4 @@
-# 28 个调优开关的完整台账
+# 29 个调优开关的完整台账
 
 > 硬件：2× Tesla V100-PCIE-32GB（GV100GL, sm_70），驱动 580.178.04，CUDA 12.8
 > 模型：Qwen3.8-Flash-Next GSQ-RCO IQ3_S（48 层 / 512 专家 top-10 / GDN+QSA 混合 / PLE n-gram 层）
@@ -33,7 +33,7 @@
 
 ---
 
-## 证伪（15 项，附失败原因）
+## 证伪（16 项，附失败原因）
 
 | 开关 | 实测结果 | 失败原因 |
 |---|---|---|
@@ -52,6 +52,7 @@
 | `--coupled-draft` | −24%~−43% | 旧版扫描证伪 |
 | `--expert-cache-per-layer` | 有害 | 旧版扫描证伪 |
 | `--spec 6` / `--mtp-max-t 8` / `--mtp-window 65536` / `--short-read 64` / `--prefill auto:32768` / `--batch` | 有害（−24%~−43%） | 旧版扫描证伪 |
+| `STRATA_HC_Q8=1`（HC 投影 Q8_0 化） | decode **−7.4%**（111.0 vs 119.9 tok/s，同二进制 ABABAB 只切 env）；质量门禁 8/8 逐字一致 | 「字节减半」假设失效：decode 不被 HC 投影流量约束（MoE 专家主导每步读取），且 q8 内核全局 partials 的单次读取比生产 staged BF16 更慢，省下的字节被算法低效吃掉还倒付。完整过程含一个 FP16 bias-15 假装成的「内核 bug」，见 [`hc-q8-2026-10-15.md`](hc-q8-2026-10-15.md) |
 
 **噪声内（双卡 99.7% 命中，无增益）**：`STRATA_ROUTE_RESIDENT` / `--aux-cpus auto` / `STRATA_ROUTE_TAIL_SKIP`
 
@@ -108,7 +109,7 @@ reasoning_budget_tokens 16384
 
 **这张表解释了本台账的形状**：prefill 是 decode 的 16 倍，所以
 「让乘法更快」的改动（WMMA、算子优化）能在 prefill 上拿到几个百分点，
-却在带宽瓶颈的 decode 上全部归零 —— 这就是下面 15 条证伪项里大多数的共同原因。
+却在带宽瓶颈的 decode 上全部归零 —— 这就是下面 16 条证伪项里大多数的共同原因。
 
 > 注：这是我们这台机器的最优点，**不是通用最优解**。你的硬件拓扑、模型、上下文长度不同，
 > 数字会不一样。`--layer-split` 和 `--mtp-q4` 这类与显存布局强相关的尤其要自己重扫。
