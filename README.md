@@ -77,6 +77,7 @@
 | 10-16 | 量化档 IQ3_S → **Q4_K_M** | — | **换档 = 所有内核结论作废**：dense 投影全变 Q8_0，单列带宽从 37–67% 峰值跳到 **81–91%**，原本设想的「访存优化」病灶直接消失。三个 dense 候选全部证伪，见 [`docs/window2-2b-dense-q4k-2026-10-16.md`](docs/window2-2b-dense-q4k-2026-10-16.md) |
 | 10-16 | 新档重取逐窗账（引擎自报） | — | **ms/窗 = 6.98 + 4.68×T**（IQ3_S 档 7.79 + 4.49T）：固定 −10%、每行 +4%。dense 每行腰斩、HC 相位对量化无感（HC 量化路线两档判死）。⚠️ **相位表的每行绝对值当晚已被判作废**，见下行，见 [`docs/window2-2c-window-account-q4k-2026-10-16.md`](docs/window2-2c-window-account-q4k-2026-10-16.md) |
 | 10-16 | **发现剖面只对半个窗口有效**（秤是坏的） | — | `verify.cpp` 里 T≥2 的验证窗拆成 2 个 group，但 `collect_profile()` 要 `G==1`、`gpu_stamp` 只对 `grp==0` ⇒ 2-2c 的每行 ms **全部作废待重测**（连带撤回「专家读 82% 峰值、候选①关闭」）。同轮实测：共享专家旁路流是净赚 **+1.7~2.2%**（HIP 上的失败结论不适用我们的 PCIe 双卡）。**下一步是修秤（覆盖所有 group 或 nsys 抓单窗），不是继续优化。** 见 [`docs/window2-2e-unnamed-row-cost-2026-10-16.md`](docs/window2-2e-unnamed-row-cost-2026-10-16.md) | **+0.8~1.2%**（T=4 窗 +2.1%） | Q8_0 **从来不在交错门里**，而 Q4_K_M 档的 dense/超连接/**lm_head 全是 Q8_0** ⇒ 换档后最热的一批 GEMV 集体走慢路径。逐位一致（7 形状 × T1-4 × 行宽 1/2/4，0 FAIL）。逐窗账也印证：每行成本 4.68 → **4.50**（−3.8%）。当轮另一条否证（2-2c 把每行净增判给共享专家，站不住——它按窗口批量、与 T 无关）仍然成立；但「专家读 82% 峰值、健康」已随下行撤回。见 [`docs/window2-2d-q8-0-il-2026-10-16.md`](docs/window2-2d-q8-0-il-2026-10-16.md) |
+| 10-16 | **nsys 逐内核账本（权威秤）** | — | 前三次全废的根因：驱动 ≥11.7 时 `--cuda-graph-trace` 默认 `graph`，**CUDA graph 内部内核一条都不收**，而验证窗正是 graph ⇒ 抓到的「解码」其实是加载段（24 token 与 200 token 结果一模一样）。加 `--cuda-graph-trace=node` 后：每多一行草稿 **4.50 ms**（生产）＝ 路由专家 1.32 + dense Q8_0 1.04 + 超连接 0.59 + 其余 0.36 ms。**候选①改判为「只针对门/上投影」**：下投影 IQ4_NL 已 775 GB/s = 峰值 **86%**（吃到顶），门/上 IQ2_S·IQ3_S 只有 **571–691 GB/s = 64–81%**，差 15–35%，预估 **2–4%**，病根是位拆解不是访存。解码期**无** PCIe 专家缺失。见 [`docs/window2-2f-nsys-kernel-budget-2026-10-16.md`](docs/window2-2f-nsys-kernel-budget-2026-10-16.md) |
 
 **注意 10-11 那一行：加内存让 prefill 涨 8~10%、加载快 38%，decode 一点没动。**
 原因不是白花钱 —— 专家早已 100% 驻留显存，decode 主路径根本不读内存。
@@ -320,6 +321,7 @@ STRATA_KEY=xxx STRATA_URL=http://127.0.0.1:8080 python3 scripts/bench_prompt.py
 - [`docs/window2-2b-dense-q4k-2026-10-16.md`](docs/window2-2b-dense-q4k-2026-10-16.md) — **换量化档之后重测 dense GEMV**：Q8_0 单列 81–91% 峰值（IQ3_S 档的「37% 带宽」病灶直接消失）、三个候选全灭，含「逐位相同 + 隔离快 8.5% → 端到端慢 5%」这个反例的完整数据
 - [`docs/window2-2c-window-account-q4k-2026-10-16.md`](docs/window2-2c-window-account-q4k-2026-10-16.md) — **新档逐窗账重新点名**：干净墙钟 ms/窗 = 6.98 + 4.68×T，dense 腰斩/HC 量化判死；⚠️ 相位表的每行绝对值已作废（见 2-2e）
 - [`docs/window2-2e-unnamed-row-cost-2026-10-16.md`](docs/window2-2e-unnamed-row-cost-2026-10-16.md) — **发现秤是坏的**：T≥2 的验证窗拆成 2 个 group 而剖面只收集 group 0 ⇒ 2-2c 全部「ms/行」作废待重测；顺带实测共享专家旁路流净赚 +1.7~2.2%。含「三种比法只有一种对」的口径纠错表
+- [`docs/window2-2f-nsys-kernel-budget-2026-10-16.md`](docs/window2-2f-nsys-kernel-budget-2026-10-16.md) — **权威秤：nsys 逐内核账本**。含三次抓废的完整坑表（`--cuda-graph-trace=node` 是关键）、每窗口/每行的相位预算、用 `grid.y` 逐个专家组量出的专家读带宽（下投影 86% 峰值 vs 门/上 64–81%），以及「解码期无 PCIe 专家缺失」「看不到跨行去重」两条附带结论
 - [`docs/window2-2d-q8-0-il-2026-10-16.md`](docs/window2-2d-q8-0-il-2026-10-16.md) — **Q8_0 接回交错 MMVQ**（本轮唯一采纳项，+0.8~1.2%）+ 两条否证（「专家跨行共享」早已实现；2-2c 的「共享专家」对账被 `shared_expert_multi(n_tok)` 的批量语义否证），以及四轮端到端 A/B（含反序消漂移、nonce 方差作废）
 - [`docs/how-we-measure.md`](docs/how-we-measure.md) — ABAB 协议与相位表读法（**先读这个再看数字**）
 

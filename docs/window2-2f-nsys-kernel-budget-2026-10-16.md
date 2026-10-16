@@ -1,0 +1,133 @@
+# Window 2-2f：nsys 逐内核账本 —— 一行草稿到底贵在哪
+
+日期：2026-10-16（当晚第六轮）· 档位：acq4（Q4_K_M pack）· 引擎 0.1.44.1 · 双 V100-PCIe-32GB
+结论一句话：**权威秤拿到了。路由专家读的下投影已经贴着 HBM 峰值（86%），门/上投影差 15–35%；
+但「每多一行草稿」的成本里，专家只占 40%，dense Q8_0 占 31%、超连接混合器占 18%。**
+
+---
+
+## 0. 为什么要这篇
+
+前面三轮（2-2c / 2-2d / 2-2e）都在用引擎自带的相位表做差值推导，而那张表是
+**两个 stage 相加**、与墙钟**没有固定换算率**（1.59 @T=1 → 1.09 @T=4），
+所以它给出的「专家读 1.34 ms/行 ⇒ 742 GB/s ≈ 峰值 82%」**不可用**，
+候选①（专家读效率）只能挂起等权威数据。这篇就是那份权威数据：nsys 逐内核墙钟。
+
+## 1. 三次失败的坑（都要记，下次别再踩）
+
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | 报告里只有 11 196 条内核、时间跨度 0.437 s，且 **24 token 与 200 token 抓到的内容一模一样** | **驱动 ≥11.7 时 `--cuda-graph-trace` 默认是 `graph`**：整张 CUDA graph 当一个 blob 记，**节点活动一条都不收**。而 Strata 的验证窗正是走 CUDA graph（"zero-doorbell graph"）⇒ **解码内核全部隐形**，抓到的只是加载期宿主启动的核 | **`--cuda-graph-trace=node`**。加上它之后内核数从 11 k → 61 k，新增的全是 `graphNodeId != 0` |
+| 2 | 第一次抓：请求落在窗口**之后** | `--delay 70 --duration 50` + `sleep 25`，插桩后启动更慢 | 见 #3 |
+| 3 | 第二次抓：请求落在窗口**之前** | 这次服务器 30 s 就 healthy，请求在 +50 s 发完，窗口 +75 s 才开 | **不要用固定 sleep**：`TGT=启动时间戳 + delay + 8`，`sleep $((TGT - now))` |
+| 4 | `nsys stats` 报 "Existing SQLite export found… Use --force-export=true" | sqlite 比 rep 旧就拒绝刷新 | 先 `rm -f *.sqlite`，再 `--force-export=true` |
+| 5 | 报告被截断（"Not all CUDA events might have been collected"，约 **107 万** 条 CUDA 事件上限） | 200 token 的解码会产生 ~600 万条事件 | **把请求缩到 `max_tokens=24`**（解码段只剩 0.22–0.28 s），整段解码就能完整装进预算 |
+
+另外两个环境事实（供复现）：
+
+- 驱动是 **580.178.04 = CUDA 13.0**，而 `/opt/cuda-12.8` 里的 nsys 2024.6.2 带的是 CUPTI 12.8。
+  它会警告 "Installed CUDA driver version (13.0) is not supported"，**但照样能用**（最小探针 20 次
+  kernel launch 全部抓到）。`/opt/cuda` 是 CUDA 13.3 但**不带 nsys**，别去那儿找。
+- 抓之前先 `sudo systemctl stop strata-sc117`，抓完再 `start`；nsys 插桩约让 tok/s 掉 12–20%
+  （T=1 81.6→66.1，T=4 98.5→83.8），所以本文的**绝对墙钟**都比生产值高，
+  **占比和边际**才是可用的。
+
+## 2. 方法
+
+- 两次独立采集：`min_p=1.0`（T≈1，26 个窗口）与 `min_p=0.0`（T≈4，12 个窗口），
+  同一 prompt、24 个输出 token、temperature 0。
+- 窗口数由 `resident_plan_kernel` 反推（每窗口每 layer 一次 ⇒ ÷48）。
+- 内核名 → 相位靠源码对号，**不靠猜**：
+  - `native_gu_multi` / `native_down_multi`（`iq_kernels.cu`）：签名是
+    `(grp_ptr, grp_start, n_groups, ent_tok, X, L, gate, up)` ⇒ **路由专家**。
+    `grid.x = 2·n_ff/(GU_ROWS·RG) = 2×640/16 = 80`（实测正是 80），**`grid.y = 专家组数`**。
+  - `gr_norm_split` 的 launch 是 `dim3(n_tok, HC)`，实测 **T=1 → grid.x=1、T=4 → grid.x=4**，
+    正对上 ⇒ **`gr_*` 那一族是超连接（HC）混合器**，不是专家。
+  - `native_small_mmvq` / `native_mmvq_multi`：`grid.x` 直接等于输出维度
+    （10240 = attn_qkv、6144 = ssm inner、2560 = ssm_out、**248320 = lm_head**）⇒ **dense Q8_0 GEMV**。
+- 字节数不走剖析器，直接由 GGUF 元数据算（脚本 `w22f_bytes.py`）。
+
+## 3. 每窗口预算（nsys 实测，核时间按两张卡求和）
+
+| 相位 | T=1 ms/窗 | 占 | T=4 ms/窗 | 占 | **边际 ms/行** | 占 |
+|---|---|---|---|---|---|---|
+| dense Q8_0 GEMV（`native_*mmvq` + lm_head） | 8.86 | 39% | 11.98 | 37% | **1.04** | 31% |
+| **路由专家**（`native_gu/down_multi` + 重排/合并/规划） | 4.88 | 22% | 8.82 | 27% | **1.32** | **40%** |
+| 超连接混合器（`gr_up/down/norm`） | 4.45 | 20% | 6.22 | 19% | **0.59** | 18% |
+| GDN / SSM | 1.09 | 5% | 1.46 | 4% | 0.12 | 4% |
+| 其它（cvec、采样、量化、规约…） | 2.70 | 12% | 3.30 | 10% | 0.20 | 6% |
+| attention | 0.65 | 3% | 0.76 | 2% | 0.04 | 1% |
+| **核时间合计** | **22.63** | | **32.54** | | **3.30** | |
+| **墙钟** | **15.23** | | **27.28** | | **4.02** | |
+
+对照生产（无插桩）拟合 **7.16 + 4.50×T**：T=1 → 11.66 ms/窗、T=4 → 25.08 ms/窗，**边际 4.50 ms/行**。
+nsys 下边际 4.02 ms/行、核时间 3.30 ms/行，差出来的 0.7–1.2 ms/行是**两张卡互相等的气泡**。
+
+解码段两张卡的忙碌度：5 ms 分桶看，**任一时刻至少一张卡在 90–100%**，T=4 时常见两卡同时 100%。
+所以这不是「内核之间有空隙」的问题，钱在内核里面。
+
+## 4. 候选① 的判决：改判，不是关闭也不是维持
+
+`grid.y` 是决定性证据 —— **它是每组（= 每个专家）的实测规模**：
+
+| | T=1 | T=4 | 每个**额外**专家组 |
+|---|---|---|---|
+| `native_gu_multi`（门+上投影） | grid.y=10，37.0 µs | grid.y=40，96.2 µs | **1.97 µs** |
+| `native_down_multi`（下投影） | grid.y=10，23.9 µs | grid.y=40，59.7 µs | **1.19 µs** |
+
+字节数（GGUF 直算，两条独立路径互验：张量尺寸 1.953 MiB/专家，引擎自报
+`12800 experts / 24.18 GiB` = 1.934 MiB/专家）：
+
+- 门+上：IQ2_S 层 2×0.488 MiB、IQ3_S 层 2×0.684 MiB ⇒ 36/12 层加权 **1.074 MiB/组**
+- 下：IQ4_NL **0.879 MiB/组**
+
+于是（V100 HBM2 峰值 **897 GB/s**）：
+
+- **下投影 0.879 MiB / 1.19 µs = 775 GB/s = 峰值 86%** ⇒ **吃到顶了，别动。**
+- **门+上 1.074 MiB / 1.97 µs = 571 GB/s = 峰值 64%**
+  （用总量边际算：0.783 ms/行 ÷ 480 组 = 1.63 µs/组 ⇒ 691 GB/s = 77%。**区间 64–81%**）
+
+**⇒ 候选① 改判为「只针对门/上投影」**：它比下投影差 15–35%。粗略收益
+（把门/上做到下投影的水平，T=4 时约 3.5 ms/窗 → 省 0.5–0.9 ms）≈ **端到端 2–4%**。
+而且**病根大概率不是带宽而是反量化算力**：下投影是 IQ4_NL（nibble 直查），
+门/上是 IQ2_S / IQ3_S（位拆解），正好对应已知的
+「Strata 走转录自 llama.cpp 旧版 vecdotq 的 CUDA-core 路径」。⇒ 要解的是**解包**，不是访存展开。
+
+## 5. 顺带钉死的三件事
+
+1. **解码期没有 PCIe 专家缺失。** 全部 589 次「≈1.93 MiB = 一个专家大小」的 HtoD 拷贝
+   都落在**预填充段**；解码段 HtoD 是 0。解码时命中的专家都在显存里，不必担心
+   「专家缓存只有 12800 / 24576 ⇒ 一半要走 PCIe」。
+2. **`grid.y = 10×T`（T=1→10，T=4→40），即解码路径里看不到跨行去重。**
+   ⚠️ 2-2d 曾据源码判定「已按 distinct expert 去重分组」——**实测 grid.y 是 10×T 的整数倍，
+   不是去重后的 38 这种数**。要么那套去重没在这条路径生效，要么 `cap_groups` 是按 `行数×top_k`
+   预分配的容量而非实际值（内核里另有 `n_groups` 指针）。**须回源码确认，不要用本文把它当定论。**
+3. **dense Q8_0 是单块最大项（37–39%）**，边际 1.04 ms/行。它读的权重每窗一次、与行数无关，
+   所以这 1.04 ms/行 是**算力**不是带宽：dense 每层 82.3 MiB Q8_0 ⇒ 全模型约 3.9 G 参数/行，
+   7.8 GFLOP / 1.04 ms ≈ **7.5 TFLOPS ≈ V100 FP32 峰值的 55%**（GEMV 用不上 tensor core）。
+   这是另一个候选，量级比专家那 2–4% 大得多，但改造面也大得多。
+
+## 6. 下一步候选（按性价比）
+
+| 候选 | 预估 | 依据 |
+|---|---|---|
+| **A. 门/上投影（IQ2_S / IQ3_S）解包路径** | **2–4%** | §4：64–81% vs 下投影 86% |
+| B. dense Q8_0 走算力更高的路径（T≥2 时考虑 mma / 更好展开） | 未知（上限大） | §5.3：目前 ~55% FP32 峰值 |
+| C. 两卡气泡（T=1 尤其明显，常只有一张卡在跑） | 未知 | §3：边际里 0.7–1.2 ms/行不是核时间 |
+
+## 7. 复现
+
+```bash
+sudo systemctl stop strata-sc117
+nsys profile --trace cuda --cuda-graph-trace=node --delay 75 --duration 120 \
+  --force-overwrite true --sample none --cpuctxsw none -o /tmp/w22f \
+  -- .venv/bin/python -m serve.server --engine strata --config configs/sc117-256k-vision.json \
+     --port 8080 --host 0.0.0.0 --api-key <key>
+# 等 health，然后按「启动时间戳 + 75 + 8 s」发一个 max_tokens=24 的请求
+rm -f /tmp/w22f.sqlite
+nsys stats --report cuda_gpu_kern_sum --format csv --force-export=true /tmp/w22f.nsys-rep
+sudo systemctl start strata-sc117
+```
+
+分析脚本（读 sqlite，解析 StringIds、分桶、按 grid.y 归组）：`w22f_report2.py` / `w22f_gridy.py`。
+字节预算（GGUF 元数据直算）：`w22f_bytes.py`。
