@@ -73,6 +73,8 @@
 | 10-10 | v0.1.41 + `STRATA_SM70_TABLE=1` | **203.1 峰值** | 同口径 +6.7%，首破 200 |
 | 10-11 | 128G 内存 + 风扇 PWM 200 | prefill +8~53% | decode 持平（专家已 100% 驻显存）；掉速真凶是风扇，见 [`docs/memory-and-thermals.md`](docs/memory-and-thermals.md) |
 | 10-13 | `--layer-split 25` + `--mtp-q4 all` | 107→110 | 4.7% + 2.4% 两轮叠加；同轮切 v0.1.43（A/B 持平，为 NaN guard），见 [`docs/engine-upgrade-notes.md`](docs/engine-upgrade-notes.md) |
+| 10-16 | 引擎 v0.1.43 → **v0.1.44.1** | 中性（+0.7%，噪声内） | 315 个上游提交换来崩溃修复与启动诊断；**prefill 块仍是 8192**——层切分下借不出缓冲区，是结构性天花板，不是旋钮问题 |
+| 10-16 | 量化档 IQ3_S → **Q4_K_M** | — | **换档 = 所有内核结论作废**：dense 投影全变 Q8_0，单列带宽从 37–67% 峰值跳到 **81–91%**，原本设想的「访存优化」病灶直接消失。三个 dense 候选全部证伪，见 [`docs/window2-2b-dense-q4k-2026-10-16.md`](docs/window2-2b-dense-q4k-2026-10-16.md) |
 
 **注意 10-11 那一行：加内存让 prefill 涨 8~10%、加载快 38%，decode 一点没动。**
 原因不是白花钱 —— 专家早已 100% 驻留显存，decode 主路径根本不读内存。
@@ -97,7 +99,7 @@ RTX 4090（24GB，280W 功耗墙）完全相同** —— 2022 年的消费级旗
 `--layer-split 25` + 专家 100% 常驻已经把这台机器榨到接近上限，换成 NVLink 机器或
 更大显存的卡，prefill 还能再上一个台阶（社区 4–6 卡 V100 带 NVLink 报到
 **7 357 tok/s prompt**，是我们 1 817 的 4 倍）。但**在没有 NVLink 的机器上，
-下面这套配置就是接近最优的解** —— 29 个开关我们全试过，采纳 13 个、证伪 16 个。
+下面这套配置就是接近最优的解** —— 32 个开关我们全试过，采纳 13 个、证伪 19 个。
 
 三个从数字里直接读出来的结论：
 
@@ -241,7 +243,7 @@ IQ3_S 的 256 宽 superblock 反量化本身就不便宜，扔到 tensor core �
 
 ---
 
-## 29 个调优开关的完整台账
+## 32 个调优开关的完整台账
 
 **采纳 13 个**（生产在跑）：
 
@@ -271,8 +273,11 @@ IQ3_S 的 256 宽 superblock 反量化本身就不便宜，扔到 tensor core �
 | `--prefill auto:16384` | 仍解析为 8192 | 专家缓存 100% 占满，借不出缓冲区 |
 | `--expert-cache-device1/2` | 引擎拒启 | 与 layer-split 互斥（要求一张空卡，4 卡以上才玩得起） |
 | `STRATA_STAGE_PIN=1` | **解码损坏** | IQ3_S 4096 prompt 后输出崩坏，严禁 |
+| `STRATA_Q8_PACKED=1`（Aurora 生产默认 +2.3%） | 逐位全对，但 attn_qkv 单列 692 → **445 GB/s（慢 40%）** | 无损 qs/d 平面拆分把一次 34 B 连续载入拆成两条流；**Volta 只有 6 MB L2 + 128 B 扇区，两条流互挤**。同一个 flag 两种卡两种结果 |
+| 列分 warp 内核（自研） | 寄存器 80 → **38 零 spill**（假设全对），但 nc=4 **慢 44%** | 每 warp 独立读自己那列的整块权重 ⇒ nc=4 = 4 份 DRAM 流量，单块 26.56 MB ≫ 6 MB L2。**占用率与访存局部性在这个内核里直接对立** |
+| `STRATA_NO_MMVQ_ROWS2=1` | **隔离基准快 8.5%、52 个输出逐位相同，端到端却慢 5%** | 每块一行 ⇒ grid 块数翻倍；独占时免费，生产里与 MoE 计算、跨 PCIe 传输并发抢卡就要付钱。**「隔离基准会高估」迄今最干净的证据——逐位相同也免检不了** |
 
-完整台账（含另 7 个有害项）见 [`docs/flag-ledger.md`](docs/flag-ledger.md)。
+完整台账（含另 10 个有害项）见 [`docs/flag-ledger.md`](docs/flag-ledger.md)。
 
 ---
 
@@ -308,8 +313,9 @@ STRATA_KEY=xxx STRATA_URL=http://127.0.0.1:8080 python3 scripts/bench_prompt.py
 - [`docs/ninfer-teardown.md`](docs/ninfer-teardown.md) — **拆解别人的 219 tok/s**：三层解构（合成语料峰值 vs 真实文本曲线 vs lossless fast path）、六个机制逐条评级——窄窗投机已实测证伪（−2.0%），KV Hadamard 旋转已实测无差异（k8v4 主路径结构性排除），Volta int8 验证内核已实测无候选价值（sm_70 无 int8 mma 硬件）
 - [`docs/iq_mmvq_bench.md`](docs/iq_mmvq_bench.md) — **内核微观基准**：IQ3_S 多列内核 ncols 1→8 实测曲线（单列带宽 329 GB/s = 37% peak、边际列 6.6 vs 20.8 µs）+ mma.sync 硬件支持矩阵（sm_70 只有 m8n8k4 f16，int8 一票没有）+ 新候选「访存优化」的出发点
 - [`docs/multigpu-wmma-bug.md`](docs/multigpu-wmma-bug.md) — 多卡 bug 的完整分析与补丁说明
-- [`docs/flag-ledger.md`](docs/flag-ledger.md) — 29 个开关的完整台账与证伪原因
+- [`docs/flag-ledger.md`](docs/flag-ledger.md) — 32 个开关的完整台账与证伪原因
 - [`docs/multi-gpu-and-interconnect.md`](docs/multi-gpu-and-interconnect.md) — 单卡/双卡/三卡/四卡 + NVLink 的建议矩阵
+- [`docs/window2-2b-dense-q4k-2026-10-16.md`](docs/window2-2b-dense-q4k-2026-10-16.md) — **换量化档之后重测 dense GEMV**：Q8_0 单列 81–91% 峰值（IQ3_S 档的「37% 带宽」病灶直接消失）、三个候选全灭，含「逐位相同 + 隔离快 8.5% → 端到端慢 5%」这个反例的完整数据
 - [`docs/how-we-measure.md`](docs/how-we-measure.md) — ABAB 协议与相位表读法（**先读这个再看数字**）
 
 ---
