@@ -75,6 +75,7 @@
 | 10-13 | `--layer-split 25` + `--mtp-q4 all` | 107→110 | 4.7% + 2.4% 两轮叠加；同轮切 v0.1.43（A/B 持平，为 NaN guard），见 [`docs/engine-upgrade-notes.md`](docs/engine-upgrade-notes.md) |
 | 10-16 | 引擎 v0.1.43 → **v0.1.44.1** | 中性（+0.7%，噪声内） | 315 个上游提交换来崩溃修复与启动诊断；**prefill 块仍是 8192**——层切分下借不出缓冲区，是结构性天花板，不是旋钮问题 |
 | 10-16 | 量化档 IQ3_S → **Q4_K_M** | — | **换档 = 所有内核结论作废**：dense 投影全变 Q8_0，单列带宽从 37–67% 峰值跳到 **81–91%**，原本设想的「访存优化」病灶直接消失。三个 dense 候选全部证伪，见 [`docs/window2-2b-dense-q4k-2026-10-16.md`](docs/window2-2b-dense-q4k-2026-10-16.md) |
+| 10-16 | 新档重取逐窗账（引擎自报） | — | **ms/窗 = 6.98 + 4.68×T**（IQ3_S 档 7.79 + 4.49T）：固定 −10%、每行 +4%——每行净增与共享专家字节 +48% 的折算严丝合缝。dense 每行腰斩、专家读 1.34 ms/行连续两档头号、HC 相位对量化无感（HC 量化路线两档判死），见 [`docs/window2-2c-window-account-q4k-2026-10-16.md`](docs/window2-2c-window-account-q4k-2026-10-16.md) |
 
 **注意 10-11 那一行：加内存让 prefill 涨 8~10%、加载快 38%，decode 一点没动。**
 原因不是白花钱 —— 专家早已 100% 驻留显存，decode 主路径根本不读内存。
@@ -316,6 +317,7 @@ STRATA_KEY=xxx STRATA_URL=http://127.0.0.1:8080 python3 scripts/bench_prompt.py
 - [`docs/flag-ledger.md`](docs/flag-ledger.md) — 32 个开关的完整台账与证伪原因
 - [`docs/multi-gpu-and-interconnect.md`](docs/multi-gpu-and-interconnect.md) — 单卡/双卡/三卡/四卡 + NVLink 的建议矩阵
 - [`docs/window2-2b-dense-q4k-2026-10-16.md`](docs/window2-2b-dense-q4k-2026-10-16.md) — **换量化档之后重测 dense GEMV**：Q8_0 单列 81–91% 峰值（IQ3_S 档的「37% 带宽」病灶直接消失）、三个候选全灭，含「逐位相同 + 隔离快 8.5% → 端到端慢 5%」这个反例的完整数据
+- [`docs/window2-2c-window-account-q4k-2026-10-16.md`](docs/window2-2c-window-account-q4k-2026-10-16.md) — **新档逐窗账重新点名**：ms/窗 = 6.98 + 4.68×T，每行净增 = 共享专家字节 +48%，dense 腰斩/专家读头号/HC 量化判死的完整相位对照表
 - [`docs/how-we-measure.md`](docs/how-we-measure.md) — ABAB 协议与相位表读法（**先读这个再看数字**）
 
 ---
