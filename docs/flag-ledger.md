@@ -216,3 +216,22 @@ reasoning_budget_tokens 16384
 > 注：这是我们这台机器的最优点，**不是通用最优解**。你的硬件拓扑、模型、上下文长度不同，
 > 数字会不一样。`--layer-split` 和 `--mtp-q4` 这类与显存布局强相关的尤其要自己重扫。
 > 参考 [`multi-gpu-and-interconnect.md`](multi-gpu-and-interconnect.md) 里的扫描区间。
+
+---
+
+## MoE4All 对照（2026-10-17）—— [`moe4all-cross-check-2026-10-17.md`](moe4all-cross-check-2026-10-17.md)
+
+外部框架 MoE4All（Rust+Vulkan 三级存储，**同一个 Flash-Next 模型、同源 AD-4.27bpw 量化**）
+的完整逐条对照。**没有可搬的内核优化，吸收物是三条负面结论 + 一套方法论**：
+
+| 编号 | 结论 | 状态 |
+|---|---|---|
+| M1 | mask-before-codebook-init（它单行 +0.6%）：我们 `s2_expert_grouped.cu:827` mask 就是内核第一行 | 无增量 |
+| M2 | IQ2_S tree/NR=8（它 VERIFY −45.6%）、IQ3_S NR 全否：我们已有 tree 变体 + GU_ROWS=32/D_ROWS=64，对齐即默认走 | 无增量；反向印证候选①病根在解包算力 |
+| M3 | MTP prime 慢 9.5%（781 MiB D2H2D + 全行 VERIFY）：我们专用 graph + 纯 D2D + E-4 批处理记录 + first_needed 剪枝，每个维度更优 | 我们的实现更优 |
+| M4 | **native IQ pack 结构性要求 `--spec>=2` ⇒ MTP 不可关**，「关 MTP 测 prefill 基线」不存在；CLI generate 不支持 `--layer-split`（仅 --serve） | 新事实 |
+| M5 | **低权重专家跳过死路**：删 <10% 权重专家 hidden 误差 max 9.34%（7.75% 权重专家影响是高权者 2.42 倍），重归一化 154/156 层更差；它也未测速未启用 | 勿碰 |
+| M6 | UGD 不按 tier 拆（拆了慢 0.1–3.1 ms）；专家缓存角色配额不如全局 LRU（miss +5.72%） | 勿碰 |
+| M7 | 专家 miss 曲线（15.5 GiB→12.65% / 32→1.06% / 48→0.10%）+ 多卡配比 argmin 公式 | 方法论存档，留给专家量 >2×单卡显存的下一代模型 |
+| M8 | 生产口径 prefill 基线（新测）：**~9600 token prompt，1516.8 tok/s 中位**（离散度 0.08%） | 已入账 |
+| M9 | `STRATA_DRAFT_TIMING=1` 在 serve 模式**不触发**（serve 走 chain 路径，不经 mtp.draft 计时分支），80 请求 3000+ rounds 零输出 | 诊断开关对生产无效，勿再花时间 |
